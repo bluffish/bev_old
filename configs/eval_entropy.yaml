@@ -1,0 +1,6 @@
+data_path: '../data/carla'
+model_path: './checkpoints/entropy.pt'
+type: 'entropy'
+gpus: [0]
+lr: 1e-3
+weight_decay: 1e-7

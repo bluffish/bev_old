@@ -1,0 +1,6 @@
+data_path: '../data/carla'
+model_path: './checkpoints/uncertainty.pt'
+type: 'vacuity'
+gpus: [0]
+batch_size: 32
+num_workers: 64

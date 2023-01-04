@@ -1,0 +1,8 @@
+outputs/
+exp1/
+checkpoints/
+.idea/
+venv/
+wandb/
+
+*.pt
