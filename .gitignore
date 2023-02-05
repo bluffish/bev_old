@@ -4,5 +4,8 @@ checkpoints/
 .idea/
 venv/
 wandb/
+carla/
+coarse_search/
+outputs_old/
 
 *.pt

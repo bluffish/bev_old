@@ -3,7 +3,7 @@ from typing import Any
 import torch
 from torch import nn
 from efficientnet_pytorch import EfficientNet
-from torchvision.models.resnet import resnet18
+from torchvision.models.swin_transformer import swin_v2_b
 
 
 def gen_dx_bx(x_bound, y_bound, z_bound):
@@ -121,7 +121,7 @@ class BevEncode(nn.Module):
     def __init__(self, inC, outC):
         super(BevEncode, self).__init__()
 
-        trunk = resnet18(weights=None, zero_init_residual=True)
+        trunk = swin_v2_b(weights=None)
         self.conv1 = nn.Conv2d(inC, 64, kernel_size=7, stride=2, padding=3,
                                bias=False)
         self.bn1 = trunk.bn1
@@ -156,7 +156,7 @@ class BevEncode(nn.Module):
         return x
 
 
-class LiftSplatShoot(nn.Module):
+class BEVDet(nn.Module):
     def __init__(
             self,
             x_bound=[-50.0, 50.0, 0.5],
@@ -166,7 +166,7 @@ class LiftSplatShoot(nn.Module):
             final_dim=(128, 352),
             outC=2
     ):
-        super(LiftSplatShoot, self).__init__()
+        super(BEVDet, self).__init__()
 
         self.d_bound = d_bound
         self.final_dim = final_dim

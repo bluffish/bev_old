@@ -1,5 +1,6 @@
 data_path: '../data/carla'
-type: 'baseline_uce'
+type: 'baseline_ce'
+model: 'BEVDet'
 gpus: [4,5,6,7]
 dataset: 'nuscenes'
 batch_size: 64

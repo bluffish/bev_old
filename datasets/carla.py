@@ -29,7 +29,6 @@ def mask(img, target):
     m = np.all(img == target, axis=2).astype(int)
     return m
 
-
 def get_rot(h):
     return torch.Tensor([
         [np.cos(h), np.sin(h)],
@@ -117,20 +116,22 @@ class CarlaDataset(torch.utils.data.Dataset):
         post_rots = []
         post_trans = []
 
-        binimgs_r = Image.open(os.path.join(agent_path + "birds_view_semantic_camera", str(idx) + '.png'))
-        binimgs = np.array(binimgs_r)
-        binimgs_r.close()
+        label_r = Image.open(os.path.join(agent_path + "birds_view_semantic_camera", str(idx) + '.png'))
+        label = np.array(label_r)
+        label_r.close()
 
-        road = mask(binimgs, (128, 64, 128)) | mask(binimgs, (157, 234, 50))
-        vehicles = mask(binimgs, (0, 0, 142))
+        road = mask(label, (128, 64, 128))
+        lane = mask(label, (157, 234, 50))
+        vehicles = mask(label, (0, 0, 142))
         empty = np.ones((200, 200))
 
         empty[vehicles == 1] = 0
         empty[road == 1] = 0
+        empty[lane == 1] = 0
 
-        binimgs = np.stack((vehicles, road, empty))
+        label = np.stack((vehicles, road, lane, empty))
 
-        binimgs = torch.tensor(binimgs)
+        label = torch.tensor(label)
 
         for sensor_name, sensor_info in self.sensors_info['sensors'].items():
             if sensor_info["sensor_type"] == "sensor.camera.rgb" and sensor_name != "birds_view_camera":
@@ -205,12 +206,7 @@ class CarlaDataset(torch.utils.data.Dataset):
         return (torch.stack(imgs).float(),
                 torch.stack(rots).float(), torch.stack(trans).float(),
                 torch.stack(intrins).float(), torch.stack(post_rots).float(), torch.stack(post_trans).float(),
-                binimgs.float())
-
-        # return (torch.stack(imgs).float(), torch.stack(img_segs).float(), torch.stack(depths).float(),
-        #         torch.stack(rots).float(), torch.stack(trans).float(),
-        #         torch.stack(intrins).float(), torch.stack(post_rots).float(), torch.stack(post_trans).float(),
-        #         binimgs.float())
+                label.float())
 
     def sample_augmentation(self):
         H, W = self.H, self.W

@@ -5,12 +5,14 @@ from sklearn.metrics import precision_recall_curve, average_precision_score, Pre
 from sklearn.metrics import roc_curve, roc_auc_score
 from tqdm import tqdm
 
+from datasets.nuscenes import compile_data
 from models.lift_splat_shoot import LiftSplatShoot
 from models.lift_splat_shoot_gpn import LiftSplatShootGPN
 
 from datasets.carla import CarlaDataset
 from tools.utils import *
 from tools.uncertainty import *
+from tools.gpn_loss import *
 
 import argparse
 import yaml
@@ -22,33 +24,49 @@ def eval(
         config
 ):
 
-    val_dataset = CarlaDataset(os.path.join(config['data_path'], "val/"))
-    val_loader = torch.utils.data.DataLoader(val_dataset,
-                                             batch_size=config['batch_size'],
-                                             shuffle=False,
-                                             num_workers=config['num_workers'])
+    if config['dataset'] == 'carla':
+        train_dataset = CarlaDataset(os.path.join(config['data_path'], "train/"))
+        train_loader = torch.utils.data.DataLoader(train_dataset,
+                                                   batch_size=config['batch_size'],
+                                                   shuffle=True,
+                                                   num_workers=config['num_workers'],
+                                                   drop_last=True)
+
+        val_dataset = CarlaDataset(os.path.join(config['data_path'], "val/"))
+        val_loader = torch.utils.data.DataLoader(val_dataset,
+                                                 batch_size=config['batch_size'],
+                                                 shuffle=True,
+                                                 num_workers=config['num_workers'],
+                                                 drop_last=True)
+    elif config['dataset'] == 'nuscenes':
+        train_loader, val_loader = compile_data("mini", "../data/nuscenes/", config['batch_size'], config['num_workers'])
 
     gpus = config['gpus']
     device = torch.device('cpu') if len(gpus) < 0 else torch.device(f'cuda:{gpus[0]}')
+    num_classes = 4
 
-    num_classes = 2
-
-    if config['type'] == 'entropy':
+    if config['type'] == 'baseline_ce':
         activation = torch.softmax
-        uncertainty_function = entropy
         model = LiftSplatShoot(outC=num_classes)
-    if config['type'] == 'dissonance' or config['type'] == 'vacuity':
+    elif config['type'] == 'baseline_uce':
         activation = activate_uncertainty
-        uncertainty_function = dissonance
         model = LiftSplatShoot(outC=num_classes)
-    if config['type'] == 'gpn':
-        activation = activate_uncertainty
-        uncertainty_function = dissonance
+    elif config['type'] == 'postnet_ce':
+        activation = activate_gpn
         model = LiftSplatShootGPN(outC=num_classes)
+        model.bevencode.last = None
+    elif config['type'] == 'postnet_uce':
+        activation = activate_gpn
+        model = LiftSplatShootGPN(outC=num_classes)
+        model.bevencode.last = None
+    elif config['type'] == 'postnet_uce_cnn':
+        activation = activate_gpn
+        model = LiftSplatShootGPN(outC=num_classes)
+    else:
+        raise ValueError("Please pick a valid model type.")
 
-    model = nn.DataParallel(model, device_ids=gpus)
+    model = nn.DataParallel(model, device_ids=gpus).to(device).eval()
     model.load_state_dict(torch.load(config['model_path']))
-    model.to(device).eval()
 
     print("--------------------------------------------------")
     print(f"Starting eval on {config['type']} model")
@@ -71,7 +89,7 @@ def eval(
         os.makedirs(out_path)
 
     with torch.no_grad():
-        for (imgs, img_segs, depths, rots, trans, intrins, post_rots, post_trans, binimgs) in tqdm(val_loader):
+        for (imgs, rots, trans, intrins, post_rots, post_trans, labels) in tqdm(val_loader):
 
             preds = model(imgs,
                           rots,
@@ -80,40 +98,44 @@ def eval(
                           post_rots,
                           post_trans)
 
-            binimgs = binimgs.to(device)
+            labels = labels.to(device)
 
-            uncert = uncertainty_function(preds)
+            uncert = entropy(preds)
 
-            try:
+            if config['type'] == 'postnet_uce' \
+                    or config['type'] == 'postnet_uce_cnn' \
+                    or config['type'] == 'baseline_uce':
                 preds = activation(preds)
-            except Exception as e:
+            elif config['type'] == 'baseline_ce':
                 preds = activation(preds, dim=1)
+            elif config['type'] == 'postnet_ce':
+                preds = activation(preds)
 
-            intersect, union = get_iou(preds, binimgs)
+            intersect, union = get_iou(preds, labels)
 
             for i in range(num_classes):
                 total_intersect[i] += intersect[i]
                 total_union[i] += union[i]
 
-            save_pred(preds, binimgs, out_path)
+            save_pred(preds, labels, out_path)
             plt.imsave(os.path.join(out_path, "uncertainty_map.jpg"), plt.cm.jet(uncert[0][0]))
 
             preds = preds[:, 0, :, :].ravel()
-            binimgs = binimgs[:, 0, :, :].ravel()
+            labels = labels[:, 0, :, :].ravel()
             uncert = torch.tensor(uncert).ravel()
 
-            vehicle = np.logical_or(preds.cpu() > 0.5, binimgs.cpu() == 1).bool()
+            vehicle = np.logical_or(preds.cpu() > 0.5, labels.cpu() == 1).bool()
 
             preds = preds[vehicle]
-            binimgs = binimgs[vehicle]
+            labels = labels[vehicle]
             uncert = uncert[vehicle]
 
             pred = (preds > 0.5)
-            tgt = binimgs.bool()
+            tgt = labels.bool()
             intersect = (pred == tgt).type(torch.int64)
 
             y_true += intersect.tolist()
-            # y_true += binimgs.cpu().tolist()
+            # y_true += labels.cpu().tolist()
             uncert = -uncert
             y_scores += uncert.tolist()
 

@@ -130,7 +130,11 @@ def edl_loss(func, y, alpha, epoch_num, num_classes, annealing_step, device=None
     alpha = alpha.to(device)
     S = torch.sum(alpha, dim=1, keepdim=True)
 
-    A = torch.sum(y * (func(S) - func(alpha) + 1e-10), dim=1, keepdim=True)
+    B = y * (torch.digamma(S) - torch.digamma(alpha) + 1e-10)
+
+    B[:, 0] *= 2
+    # print(B.shape)
+    A = torch.sum(B, dim=1, keepdim=True)
 
     # annealing_coef = torch.min(
     #     torch.tensor(1.0, dtype=torch.float32),

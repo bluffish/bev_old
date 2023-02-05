@@ -18,7 +18,6 @@ def get_class_probalities(self, data):
 
     return p_c
 
-
 class BevEncodeGPN(nn.Module):
     def __init__(self, inC, outC):
         super(BevEncodeGPN, self).__init__()
@@ -64,9 +63,10 @@ class BevEncodeGPN(nn.Module):
         x = self.up1(x, x1)
         x = self.up2(x)
 
-        x = x.permute(0, 2, 3, 1)
+        x = x.permute(0, 2, 3, 1).to(x.device)
         x = x.reshape(-1, self.latent_size)
-        p_c = torch.tensor([0.2, 0.4, 0.4]).to(x.device)
+        p_c = torch.tensor([0.1, 0.35, 0.05, 0.4]).to(x.device)
+
         log_q_ft_per_class = self.flow(x) + p_c.view(1, -1)
 
         beta = self.evidence(
@@ -75,7 +75,8 @@ class BevEncodeGPN(nn.Module):
 
         beta = beta.reshape(-1, self.outC, 200, 200)
 
-        beta = self.last(beta.log()).exp()
+        if self.last is not None:
+            beta = self.last(beta.log()).exp()
         alpha = beta+1
         return alpha.clamp(min=1e-4)
 

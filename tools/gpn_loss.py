@@ -29,7 +29,7 @@ def activate_gpn(alpha):
     return prob
 
 
-def gpn_loss(
+def uce_loss(
         alpha: torch.Tensor,
         y: torch.Tensor,
         reduction: str = 'mean') -> torch.Tensor:
@@ -45,18 +45,11 @@ def gpn_loss(
     """
     S = torch.sum(alpha, dim=1, keepdim=True)
 
-    A = torch.sum(y * (torch.digamma(S) - torch.digamma(alpha) + 1e-10), dim=1, keepdim=True)
+    B = y * (torch.digamma(S) - torch.digamma(alpha) + 1e-10)
+
+    B[:, 0, :, :] *= 2
+    B[:, 2, :, :] *= 4
+
+    A = torch.sum(B, dim=1, keepdim=True)
 
     return loss_reduce(A, reduction=reduction)
-
-    # y = torch.argmax(y, dim=1)
-    #
-    # if alpha.dim() == 1:
-    #     alpha = alpha.view(1, -1)
-    #
-    # a_sum = alpha.sum(-1)
-    # a_true = alpha.gather(-1, y.view(-1, 1)).squeeze(-1)
-    #
-    # uce = a_sum.digamma() - a_true.digamma()
-    #
-    # return loss_reduce(uce, reduction=reduction)

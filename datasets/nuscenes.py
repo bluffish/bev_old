@@ -4,9 +4,13 @@ import numpy as np
 from PIL import Image
 import cv2
 from pyquaternion import Quaternion
+
 from nuscenes.nuscenes import NuScenes
 from nuscenes.utils.splits import create_splits_scenes
 from nuscenes.utils.data_classes import Box
+from nuscenes.map_expansion.map_api import NuScenesMap
+
+import matplotlib.pyplot as plt
 from glob import glob
 import torchvision
 
@@ -64,26 +68,29 @@ def img_transform(img, post_rot, post_tran,
 class NuscData(torch.utils.data.Dataset):
     def __init__(self,
                  nusc,
+                 nusc_maps,
                  is_train=False,
-                 H=128, W=352,
+                 H=900, W=1600,
                  resize_lim=(0.193, 0.225),
                  final_dim=(128, 352),
                  bot_pct_lim=(0.0, 0.22),
                  rot_lim=(-5.4, 5.4),
                  rand_flip=True,
-                 x_bound=[-50.0, 50.0, 0.5],
-                 y_bound=[-50.0, 50.0, 0.5],
-                 z_bound=[-10.0, 10.0, 20.0],
-                 d_bound=[4.0, 45.0, 1.0],
-                 ):
+                 ncams=5,
 
-        grid_conf = {
-            'xbound': x_bound,
-            'ybound': y_bound,
-            'zbound': z_bound,
-            'dbound': d_bound,
+                 xbound=[-50.0, 50.0, 0.5],
+                 ybound=[-50.0, 50.0, 0.5],
+                 zbound=[-10.0, 10.0, 20.0],
+                 dbound=[4.0, 45.0, 1.0],
+        ):
+
+        self.grid_conf = {
+            'xbound': xbound,
+            'ybound': ybound,
+            'zbound': zbound,
+            'dbound': dbound,
         }
-        data_aug_conf = {
+        self.data_aug_conf = {
             'resize_lim': resize_lim,
             'final_dim': final_dim,
             'rot_lim': rot_lim,
@@ -92,21 +99,25 @@ class NuscData(torch.utils.data.Dataset):
             'bot_pct_lim': bot_pct_lim,
             'cams': ['CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT',
                      'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT'],
-            'Ncams': 5,
+            'Ncams': ncams,
         }
 
-        self.nusc = nusc
-        self.is_train = is_train
-        self.data_aug_conf = data_aug_conf
-        self.grid_conf = grid_conf
 
+        self.nusc = nusc
+        self.nusc_maps = nusc_maps
+        self.is_train = is_train
         self.scenes = self.get_scenes()
         self.ixes = self.prepro()
 
-        dx, bx, nx = gen_dx_bx(grid_conf['xbound'], grid_conf['ybound'], grid_conf['zbound'])
+        dx, bx, nx = gen_dx_bx(self.grid_conf['xbound'], self.grid_conf['ybound'], self.grid_conf['zbound'])
         self.dx, self.bx, self.nx = dx.numpy(), bx.numpy(), nx.numpy()
 
         self.fix_nuscenes_formatting()
+
+        self.scene2map = {}
+        for rec in nusc.scene:
+            log = nusc.get('log', rec['log_token'])
+            self.scene2map[rec['name']] = log['location']
 
         print(self)
 
@@ -200,10 +211,12 @@ class NuscData(torch.utils.data.Dataset):
         intrins = []
         post_rots = []
         post_trans = []
+
         for cam in cams:
             samp = self.nusc.get('sample_data', rec['data'][cam])
             imgname = os.path.join(self.nusc.dataroot, samp['filename'])
             img = Image.open(imgname)
+            # img.save(cam+".jpg")
             post_rot = torch.eye(2)
             post_tran = torch.zeros(2)
 
@@ -238,37 +251,58 @@ class NuscData(torch.utils.data.Dataset):
         return (torch.stack(imgs), torch.stack(rots), torch.stack(trans),
                 torch.stack(intrins), torch.stack(post_rots), torch.stack(post_trans))
 
-    def get_binimg(self, rec):
+    def get_label(self, rec):
         egopose = self.nusc.get('ego_pose',
                                 self.nusc.get('sample_data', rec['data']['LIDAR_TOP'])['ego_pose_token'])
         trans = -np.array(egopose['translation'])
         rot = Quaternion(egopose['rotation']).inverse
-        img = np.zeros((self.nx[0], self.nx[1]))
+        vehicles = np.zeros((self.nx[0], self.nx[1]))
+
         for tok in rec['anns']:
             inst = self.nusc.get('sample_annotation', tok)
-            # add category for lyft
-            if not inst['category_name'].split('.')[0] == 'vehicle':
-                continue
-            box = Box(inst['translation'], inst['size'], Quaternion(inst['rotation']))
-            box.translate(trans)
-            box.rotate(rot)
 
-            pts = box.bottom_corners()[:2].T
-            pts = np.round(
-                (pts - self.bx[:2] + self.dx[:2] / 2.) / self.dx[:2]
-            ).astype(np.int32)
-            pts[:, [1, 0]] = pts[:, [0, 1]]
-            cv2.fillPoly(img, [pts], 1.0)
+            if inst['category_name'].split('.')[0] == 'vehicle':
+                box = Box(inst['translation'], inst['size'], Quaternion(inst['rotation']))
+                box.translate(trans)
+                box.rotate(rot)
 
-        img = torch.Tensor(img).unsqueeze(0)
-        vehicles = mask(img, (0, 0, 142))
-        empty = np.ones((200, 200))
+                pts = box.bottom_corners()[:2].T
+                pts = np.round(
+                    (pts - self.bx[:2] + self.dx[:2] / 2.) / self.dx[:2]
+                ).astype(np.int32)
+                pts[:, [1, 0]] = pts[:, [0, 1]]
+                cv2.fillPoly(vehicles, [pts], 1.0)
+
+        full_frame(200*0.01, 200*0.01)
+        plot_nusc_map(rec, self.nusc_maps, self.nusc, self.scene2map, self.dx[:2], self.bx[:2])
+
+        plt.xlim((200, 0))
+        plt.ylim((0, 200))
+
+        plt.draw()
+        canvas = plt.gca().figure.canvas
+        data = np.frombuffer(canvas.tostring_rgb(), dtype=np.uint8)
+        map = data.reshape(canvas.get_width_height()[::-1] + (3,))
+
+        plt.close()
+
+        road = mask(map, (0, 255, 0))
+        lane = mask(map, (0, 0, 255))
+
+        road = cv2.flip(road, 0)
+        road = cv2.flip(road, 1)
+        lane = cv2.flip(lane, 0)
+        lane = cv2.flip(lane, 1)
+
+        empty = torch.ones((200, 200))
 
         empty[vehicles == 1] = 0
-        binimgs = np.stack((vehicles, empty))
-        binimgs = torch.tensor(binimgs)
+        empty[road == 1] = 0
+        empty[lane == 1] = 0
 
-        return binimgs
+        label = np.stack((vehicles, road, lane, empty))
+
+        return torch.tensor(label)
 
     def choose_cams(self):
         if self.is_train and self.data_aug_conf['Ncams'] < len(self.data_aug_conf['cams']):
@@ -285,23 +319,117 @@ class NuscData(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.ixes)
 
-
-class SegmentationData(NuscData):
-    def __init__(self, *args, **kwargs):
-        super(SegmentationData, self).__init__(*args, **kwargs)
-
     def __getitem__(self, index):
         rec = self.ixes[index]
 
         cams = self.choose_cams()
         imgs, rots, trans, intrins, post_rots, post_trans = self.get_image_data(rec, cams)
-        binimg = self.get_binimg(rec)
+        label = self.get_label(rec)
 
-        return imgs, rots, trans, intrins, post_rots, post_trans, binimg
+        return imgs, rots, trans, intrins, post_rots, post_trans, label
 
 
 def worker_rnd_init(x):
     np.random.seed(13 + x)
+
+
+def get_nusc_maps(map_folder):
+    nusc_maps = {map_name: NuScenesMap(dataroot=map_folder,
+                                       map_name=map_name) for map_name in [
+                     "singapore-hollandvillage",
+                     "singapore-queenstown",
+                     "boston-seaport",
+                     "singapore-onenorth",
+                 ]}
+    return nusc_maps
+
+
+def full_frame(width=None, height=None):
+    import matplotlib as mpl
+    mpl.rcParams['savefig.pad_inches'] = 0
+    figsize = None if width is None else (width, height)
+    fig = plt.figure(figsize=figsize)
+    ax = plt.axes([0,0,1,1], frameon=False)
+    ax.get_xaxis().set_visible(False)
+    ax.get_yaxis().set_visible(False)
+    plt.autoscale(tight=True)
+
+
+def plot_nusc_map(rec, nusc_maps, nusc, scene2map, dx, bx):
+    egopose = nusc.get('ego_pose', nusc.get('sample_data', rec['data']['LIDAR_TOP'])['ego_pose_token'])
+    map_name = scene2map[nusc.get('scene', rec['scene_token'])['name']]
+
+    rot = Quaternion(egopose['rotation']).rotation_matrix
+    rot = np.arctan2(rot[1, 0], rot[0, 0])
+    center = np.array([egopose['translation'][0], egopose['translation'][1], np.cos(rot), np.sin(rot)])
+
+    poly_names = ['road_segment', 'lane']
+    line_names = ['road_divider', 'lane_divider']
+    lmap = get_local_map(nusc_maps[map_name], center,
+                         50.0, poly_names, line_names)
+    for name in poly_names:
+        for la in lmap[name]:
+            pts = (la - bx) / dx
+            plt.fill(pts[:, 1], pts[:, 0], c=(0.0, 1.0, 0.0), alpha=1)
+    for la in lmap['road_divider']:
+        pts = (la - bx) / dx
+        plt.plot(pts[:, 1], pts[:, 0], c=(0.0, 0.0, 1.0), alpha=1)
+    for la in lmap['lane_divider']:
+        pts = (la - bx) / dx
+        plt.plot(pts[:, 1], pts[:, 0], c=(0.0, 0.0, 1.0), alpha=1)
+
+
+def get_local_map(nmap, center, stretch, layer_names, line_names):
+    # need to get the map here...
+    box_coords = (
+        center[0] - stretch,
+        center[1] - stretch,
+        center[0] + stretch,
+        center[1] + stretch,
+    )
+
+    polys = {}
+
+    # polygons
+    records_in_patch = nmap.get_records_in_patch(box_coords,
+                                                 layer_names=layer_names,
+                                                 mode='intersect')
+    for layer_name in layer_names:
+        polys[layer_name] = []
+        for token in records_in_patch[layer_name]:
+            poly_record = nmap.get(layer_name, token)
+            if layer_name == 'drivable_area':
+                polygon_tokens = poly_record['polygon_tokens']
+            else:
+                polygon_tokens = [poly_record['polygon_token']]
+
+            for polygon_token in polygon_tokens:
+                polygon = nmap.extract_polygon(polygon_token)
+                polys[layer_name].append(np.array(polygon.exterior.xy).T)
+
+    # lines
+    for layer_name in line_names:
+        polys[layer_name] = []
+        for record in getattr(nmap, layer_name):
+            token = record['token']
+
+            line = nmap.extract_line(record['line_token'])
+            if line.is_empty:  # Skip lines without nodes
+                continue
+            xs, ys = line.xy
+
+            polys[layer_name].append(
+                np.array([xs, ys]).T
+            )
+
+    # convert to local coordinates in place
+    rot = get_rot(np.arctan2(center[3], center[2])).T
+    for layer_name in polys:
+        for rowi in range(len(polys[layer_name])):
+            polys[layer_name][rowi] -= center[:2]
+            polys[layer_name][rowi] = np.dot(polys[layer_name][rowi], rot)
+
+    return polys
 
 
 def compile_data(version, dataroot, bsz,
@@ -309,17 +437,19 @@ def compile_data(version, dataroot, bsz,
     nusc = NuScenes(version='v1.0-{}'.format(version),
                     dataroot=os.path.join(dataroot, version),
                     verbose=False)
+    print(os.path.join(dataroot, version))
+    nusc_maps = get_nusc_maps(os.path.join(dataroot, version))
 
-    traindata = SegmentationData(nusc, is_train=True)
-    valdata = SegmentationData(nusc, is_train=False)
+    train_data = NuscData(nusc, nusc_maps, is_train=True)
+    val_data = NuscData(nusc, nusc_maps, is_train=False)
 
-    trainloader = torch.utils.data.DataLoader(traindata, batch_size=bsz,
-                                              shuffle=True,
-                                              num_workers=nworkers,
-                                              drop_last=True,
-                                              worker_init_fn=worker_rnd_init)
-    valloader = torch.utils.data.DataLoader(valdata, batch_size=bsz,
-                                            shuffle=False,
-                                            num_workers=nworkers)
+    train_loader = torch.utils.data.DataLoader(train_data, batch_size=bsz,
+                                               shuffle=True,
+                                               num_workers=nworkers,
+                                               drop_last=True,
+                                               worker_init_fn=worker_rnd_init)
+    val_loader = torch.utils.data.DataLoader(val_data, batch_size=bsz,
+                                             shuffle=False,
+                                             num_workers=nworkers)
 
-    return trainloader, valloader
+    return train_loader, val_loader

@@ -5,6 +5,7 @@ from tensorboardX import SummaryWriter
 
 from models.lift_splat_shoot import LiftSplatShoot
 from models.lift_splat_shoot_gpn import LiftSplatShootGPN
+from models.bevdet import BEVDet
 
 from datasets.carla import CarlaDataset
 from datasets.nuscenes import compile_data
@@ -12,7 +13,6 @@ from datasets.nuscenes import compile_data
 from tools.utils import *
 from tools.uncertainty import *
 from tools.gpn_loss import *
-from torchviz import make_dot
 
 import argparse
 import yaml
@@ -21,16 +21,21 @@ from tqdm import tqdm
 torch.multiprocessing.set_sharing_strategy('file_system')
 
 
-def get_val(model, val_loader, device, loss_fn, activation, num_classes):
+def get_val(model, val_loader, device, loss_fn, activation):
     model.eval()
 
     total_loss = 0.0
-    total_iou = 0.0
+
+    vehicle_iou = 0.0
+    background_iou = 0.0
+    road_iou = 0.0
+    lane_iou = 0.0
 
     print('running eval...')
 
     with torch.no_grad():
         for (imgs, rots, trans, intrins, post_rots, post_trans, labels) in tqdm(val_loader):
+            t0 = time()
 
             preds = model(imgs,
                           rots,
@@ -39,80 +44,108 @@ def get_val(model, val_loader, device, loss_fn, activation, num_classes):
                           post_rots,
                           post_trans)
             labels = labels.to(device)
+            loss = None
 
-            if config['type'] == 'gpn':
+            if config['type'] == 'postnet_uce' \
+                    or config['type'] == 'postnet_uce_cnn' \
+                    or config['type'] == 'baseline_uce':
                 preds = activation(preds)
-                # loss = loss_fn(preds, labels)
-                loss = loss_fn(preds.log(), torch.argmax(labels, dim=1))
-            else:
-                try:
-                    loss = loss_fn(preds, labels)
-                    preds = activation(preds, dim=1)
-                except Exception as e:
-                    loss = loss_fn(preds.view(-1, num_classes), labels.view(-1, num_classes), 0, num_classes, 10,
-                                   device)
-                    preds = activation(preds)
-
-            total_loss += loss
-
-            try:
-                preds = activation(preds)
-            except Exception as e:
+                loss = loss_fn(preds, labels)
+            elif config['type'] == 'baseline_ce':
+                loss = loss_fn(preds, labels)
                 preds = activation(preds, dim=1)
+            elif config['type'] == 'postnet_ce':
+                preds = activation(preds)
+                loss = loss_fn(preds.log(), torch.argmax(labels, dim=1))
+
+            total_loss += loss * preds.shape[0]
 
             intersection, union = get_iou(preds, labels)
-            if union[0] == 0:
-                iou = 1.0
-            else:
-                iou = (intersection[0] / union[0]) * preds.shape[0]
 
-            total_iou += iou
+            if union[0] == 0:
+                vehicle_iou += 1.0
+            else:
+                vehicle_iou += (intersection[0] / union[0]) * preds.shape[0]
+
+            if union[1] == 0:
+                road_iou += 1.0
+            else:
+                road_iou += (intersection[1] / union[1]) * preds.shape[0]
+
+            if union[2] == 0:
+                lane_iou += 1.0
+            else:
+                lane_iou += (intersection[2] / union[2]) * preds.shape[0]
+
+            if union[3] == 0:
+                background_iou += 1.0
+            else:
+                background_iou += (intersection[3] / union[3]) * preds.shape[0]
 
     model.train()
 
     return {
         'loss': total_loss / len(val_loader.dataset),
-        'iou': total_iou / len(val_loader.dataset),
+        'vehicle_iou': vehicle_iou / len(val_loader.dataset),
+        'road_iou': road_iou / len(val_loader.dataset),
+        'lane_iou': lane_iou / len(val_loader.dataset),
+        'background_iou': background_iou / len(val_loader.dataset),
     }
 
 
-def train(
-        config
-):
-    train_dataset = CarlaDataset(os.path.join(config['data_path'], "train/"))
-    train_loader = torch.utils.data.DataLoader(train_dataset,
-                                               batch_size=config['batch_size'],
-                                               shuffle=True,
-                                               num_workers=config['num_workers'],
-                                               drop_last=True)
+def train():
+    if config['dataset'] == 'carla':
+        train_dataset = CarlaDataset(os.path.join(config['data_path'], "train/"))
+        train_loader = torch.utils.data.DataLoader(train_dataset,
+                                                   batch_size=config['batch_size'],
+                                                   shuffle=True,
+                                                   num_workers=config['num_workers'],
+                                                   drop_last=True)
 
-    val_dataset = CarlaDataset(os.path.join(config['data_path'], "val/"))
-    val_loader = torch.utils.data.DataLoader(val_dataset,
-                                             batch_size=config['batch_size'],
-                                             shuffle=True,
-                                             num_workers=config['num_workers'],
-                                             drop_last=True)
-
-    # train_loader, val_loader = compile_data("trainval", "../data/nuscenes/", config['batch_size'], config['num_workers'])
+        val_dataset = CarlaDataset(os.path.join(config['data_path'], "val/"))
+        val_loader = torch.utils.data.DataLoader(val_dataset,
+                                                 batch_size=config['batch_size'],
+                                                 shuffle=True,
+                                                 num_workers=config['num_workers'],
+                                                 drop_last=True)
+    elif config['dataset'] == 'nuscenes':
+        train_loader, val_loader = compile_data("trainval", "../data/nuscenes", bsz=config["batch_size"], nworkers=config['num_workers'])
 
     gpus = config['gpus']
     device = torch.device('cpu') if len(gpus) < 0 else torch.device(f'cuda:{gpus[0]}')
 
-    num_classes = 3
+    num_classes = 4
 
-    if config['type'] == 'entropy':
+    # if config['model'] == 'LSS':
+    #     mtype = LiftSplatShoot
+    #     mtype_g = LiftSplatShootGPN
+    # elif config['model'] == 'BEVDet':
+    #     mtype = BEVDet
+    #     mtype_g = None
+
+    if config['type'] == 'baseline_ce':
         activation = torch.softmax
-        loss_fn = nn.CrossEntropyLoss(weight=torch.tensor([2.0, 1.0, 1.0])).cuda(device)
+        loss_fn = nn.CrossEntropyLoss(weight=torch.tensor([2.0, 1.0, 4.0, 1.0])).cuda(device)
         model = LiftSplatShoot(outC=num_classes)
-    elif config['type'] == 'dissonance' or config['type'] == 'vacuity':
+    elif config['type'] == 'baseline_uce':
         activation = activate_uncertainty
-        loss_fn = edl_digamma_loss
+        loss_fn = uce_loss
         model = LiftSplatShoot(outC=num_classes)
-    elif config['type'] == 'gpn':
+    elif config['type'] == 'postnet_ce':
         activation = activate_gpn
-        loss_fn = torch.nn.NLLLoss(weight=torch.tensor([2.0, 1.0, 1.0])).cuda(device)
-        # loss_fn = gpn_loss
+        loss_fn = torch.nn.NLLLoss(weight=torch.tensor([2.0, 1.0, 4.0, 1.0])).cuda(device)
         model = LiftSplatShootGPN(outC=num_classes)
+        model.bevencode.last = None
+    elif config['type'] == 'postnet_uce':
+        activation = activate_gpn
+        loss_fn = uce_loss
+        model = LiftSplatShootGPN(outC=num_classes)
+        model.bevencode.last = None
+    elif config['type'] == 'postnet_uce_cnn':
+        activation = activate_gpn
+        loss_fn = uce_loss
+        model = LiftSplatShootGPN(outC=num_classes)
+        print(f"LATENT_SIZE: {model.bevencode.latent_size}")
     else:
         raise ValueError("Please pick a valid model type.")
 
@@ -121,7 +154,7 @@ def train(
     opt = torch.optim.Adam(model.parameters(), lr=config['learning_rate'], weight_decay=config['weight_decay'])
 
     print("--------------------------------------------------")
-    print(f"Starting eval on {config['type']} model")
+    print(f"Starting training on {config['type']} model")
     print(f"Using GPUS: {gpus}")
     print("Training using CARLA")
     print("TRAIN LOADER: ", len(train_loader.dataset))
@@ -132,7 +165,8 @@ def train(
 
     torch.autograd.set_detect_anomaly(True)
 
-    out_path = "./outputs/"+config['name']
+    out_path = "./carla/"+config['type']
+    # out_path = "./coarse_search/16_10"
     writer = SummaryWriter(logdir=out_path)
 
     if not os.path.exists(out_path):
@@ -142,7 +176,6 @@ def train(
         for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, labels) in enumerate(
                 train_loader):
             t0 = time()
-
             opt.zero_grad()
 
             preds = model(imgs,
@@ -151,23 +184,20 @@ def train(
                           intrins,
                           post_rots,
                           post_trans)
-
-            # make_dot(preds, params=dict(model.module.bevencode.named_parameters())).render("train_torchviz", format="png")
-
             labels = labels.to(device)
+            loss = None
 
-            if config['type'] == 'gpn':
+            if config['type'] == 'postnet_uce' \
+                    or config['type'] == 'postnet_uce_cnn' \
+                    or config['type'] == 'baseline_uce':
                 preds = activation(preds)
                 loss = loss_fn(preds, labels)
-                # loss = loss_fn(preds.log(), torch.argmax(labels, dim=1))
-            else:
-                try:
-                    loss = loss_fn(preds, labels)
-                    preds = activation(preds, dim=1)
-                except Exception as e:
-                    loss = loss_fn(preds.view(-1, num_classes), labels.view(-1, num_classes), epoch, num_classes, 10,
-                                   device)
-                    preds = activation(preds)
+            elif config['type'] == 'baseline_ce':
+                loss = loss_fn(preds, labels)
+                preds = activation(preds, dim=1)
+            elif config['type'] == 'postnet_ce':
+                preds = activation(preds)
+                loss = loss_fn(preds.log(), torch.argmax(labels, dim=1))
 
             loss.backward(retain_graph=True)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
@@ -175,25 +205,29 @@ def train(
             counter += 1
             t1 = time()
 
-            save_pred(preds, labels, out_path)
-
             if counter % 10 == 0:
                 print(counter, loss.item())
                 writer.add_scalar('train/loss', loss, counter)
+                save_pred(preds, labels, out_path)
 
             if counter % 50 == 0:
                 intersection, union = get_iou(preds, labels)
 
-                print(counter, "iou:", [intersection[0] / union[0], intersection[1] / union[1], intersection[2] / union[2]])
+                print(counter, "iou:", [intersection[0] / union[0],
+                                        intersection[1] / union[1],
+                                        intersection[2] / union[2],
+                                        intersection[3] / union[3]])
+
                 writer.add_scalar('train/vehicle_iou', intersection[0] / union[0], counter)
                 writer.add_scalar('train/road_iou', intersection[1] / union[1], counter)
-                writer.add_scalar('train/background_iou', intersection[2] / union[2], counter)
+                writer.add_scalar('train/lane_iou', intersection[2] / union[2], counter)
+                writer.add_scalar('train/background_iou', intersection[3] / union[3], counter)
 
                 writer.add_scalar('train/epoch', epoch, counter)
                 writer.add_scalar('train/step_time', t1 - t0, counter)
 
             if counter % config['val_step'] == 0:
-                val_info = get_val(model, val_loader, device, loss_fn, activation, num_classes)
+                val_info = get_val(model, val_loader, device, loss_fn, activation)
                 print('VAL', val_info)
 
                 model.eval()
@@ -203,7 +237,10 @@ def train(
                 model.train()
 
                 writer.add_scalar('val/loss', val_info['loss'], counter)
-                writer.add_scalar('val/iou', val_info['iou'], counter)
+                writer.add_scalar('val/vehicle_iou', val_info['vehicle_iou'], counter)
+                writer.add_scalar('val/road_iou', val_info['road_iou'], counter)
+                writer.add_scalar('val/lane_iou', val_info['lane_iou'], counter)
+                writer.add_scalar('val/background_iou', val_info['background_iou'], counter)
 
 
 if __name__ == "__main__":
@@ -215,4 +252,4 @@ if __name__ == "__main__":
     with open(args.config, 'r') as file:
         config = yaml.safe_load(file)
 
-    train(config)
+    train()

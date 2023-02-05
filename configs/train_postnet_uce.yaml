@@ -1,6 +1,6 @@
 data_path: '../data/carla'
-type: 'baseline_uce'
-gpus: [4,5,6,7]
+type: 'postnet_uce'
+gpus: [0,1,2,3]
 dataset: 'nuscenes'
 batch_size: 64
 num_workers: 64

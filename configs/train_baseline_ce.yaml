@@ -1,7 +1,7 @@
 data_path: '../data/carla'
-type: 'baseline_uce'
-gpus: [4,5,6,7]
-dataset: 'nuscenes'
+type: 'baseline_ce'
+gpus: [0,1,2,3]
+dataset: 'carla'
 batch_size: 64
 num_workers: 64
 weight_decay: 0.0000001

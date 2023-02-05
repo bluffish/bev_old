@@ -73,17 +73,20 @@ class ConditionedRadial(Transform):
         of a previous transform)
         """
         x0, alpha_prime, beta_prime = self._params() if callable(self._params) else self._params
-
+        x0 = x0.to(x.device)
+        alpha_prime = alpha_prime.to(x.device)
+        beta_prime = beta_prime.to(x.device)
         # Ensure invertibility using approach in appendix A.2
         alpha = F.softplus(alpha_prime)
         beta = -alpha + F.softplus(beta_prime)
 
         # Compute y and logDet using Equation 14.
         diff = x - x0[:, None, :]
-        r = diff.norm(dim=-1, keepdim=True).squeeze()
+        r = diff.norm(dim=-1, keepdim=True).squeeze().to(x.device)
         h = (alpha[:, None] + r).reciprocal()
         h_prime = - (h ** 2)
         beta_h = beta[:, None] * h
+
 
         self._cached_logDetJ = ((x0.size(-1) - 1) * torch.log1p(beta_h) +
                                 torch.log1p(beta_h + beta[:, None] * h_prime * r))

@@ -1,5 +1,4 @@
 from typing import Optional
-
 from torch import Tensor
 import torch
 import torch.nn as nn
@@ -54,7 +53,7 @@ class Density(nn.Module):
     def __init__(self,
                  dim_latent: int,
                  num_mixture_elements: int,
-                 radial_layers: int = 10,
+                 radial_layers: int = 16,
                  maf_layers: int = 0,
                  gaussian_layers: int = 0,
                  flow_size: float = 0.5,

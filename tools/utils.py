@@ -1,6 +1,7 @@
 import torch
 import cv2
 import os
+import torchshow
 
 import numpy as np
 
@@ -19,12 +20,23 @@ def get_iou(preds, labels):
 
     return intersect, union
 
-colors = [
-    [255, 0, 0],
+colors = torch.tensor([
     [0, 0, 255],
-    [0, 0, 0]
-]
+    [255, 0, 0],
+    [0, 255, 0],
+    [0, 0, 0],
+])
+
+def map(img):
+    dense = img.detach().cpu().numpy().argmax(-1)
+    rgb = np.zeros((*dense.shape, 3))
+    for label, color in enumerate(colors):
+        rgb[dense == label] = color
+    return rgb
 
 def save_pred(pred, labels, out_path):
-    cv2.imwrite(os.path.join(out_path, "pred.jpg"), np.array(pred.detach().cpu()[0].permute(1, 2, 0)) * 255)
-    cv2.imwrite(os.path.join(out_path, "label.jpg"), np.array(labels.detach().cpu()[0].permute(1, 2, 0)) * 255)
+    pred = map(pred[0].permute(1, 2, 0))
+    labels = map(labels[0].permute(1, 2, 0))
+
+    cv2.imwrite(os.path.join(out_path, "pred.jpg"), pred)
+    cv2.imwrite(os.path.join(out_path, "label.jpg"), labels)
