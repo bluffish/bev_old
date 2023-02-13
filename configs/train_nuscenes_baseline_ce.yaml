@@ -1,10 +1,10 @@
-data_path: '../data/carla'
-type: 'postnet_uce'
-gpus: [0,1,2,3]
+type: 'baseline_ce'
+logdir: './outputs'
+gpus: [0,1]
 dataset: 'nuscenes'
-batch_size: 64
+batch_size: 32
 num_workers: 64
 weight_decay: 0.0000001
 learning_rate: 0.001
 num_epochs: 100
-val_step: 500
+val_step: 1000

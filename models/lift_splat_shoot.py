@@ -141,6 +141,8 @@ class BevEncode(nn.Module):
             nn.Conv2d(128, outC, kernel_size=1, padding=0),
         )
 
+        self.tnse = False
+
     def forward(self, x):
         x = self.conv1(x)
         x = self.bn1(x)

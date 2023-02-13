@@ -95,14 +95,14 @@ def get_val(model, val_loader, device, loss_fn, activation):
 
 def train():
     if config['dataset'] == 'carla':
-        train_dataset = CarlaDataset(os.path.join(config['data_path'], "train/"))
+        train_dataset = CarlaDataset(os.path.join("../data/carla/", "train/"))
         train_loader = torch.utils.data.DataLoader(train_dataset,
                                                    batch_size=config['batch_size'],
                                                    shuffle=True,
                                                    num_workers=config['num_workers'],
                                                    drop_last=True)
 
-        val_dataset = CarlaDataset(os.path.join(config['data_path'], "val/"))
+        val_dataset = CarlaDataset(os.path.join("../data/carla/", "val/"))
         val_loader = torch.utils.data.DataLoader(val_dataset,
                                                  batch_size=config['batch_size'],
                                                  shuffle=True,
@@ -115,13 +115,6 @@ def train():
     device = torch.device('cpu') if len(gpus) < 0 else torch.device(f'cuda:{gpus[0]}')
 
     num_classes = 4
-
-    # if config['model'] == 'LSS':
-    #     mtype = LiftSplatShoot
-    #     mtype_g = LiftSplatShootGPN
-    # elif config['model'] == 'BEVDet':
-    #     mtype = BEVDet
-    #     mtype_g = None
 
     if config['type'] == 'baseline_ce':
         activation = torch.softmax
@@ -159,14 +152,14 @@ def train():
     print("Training using CARLA")
     print("TRAIN LOADER: ", len(train_loader.dataset))
     print("VAL LOADER: ", len(val_loader.dataset))
+    print("BATCH SIZE: ", config["batch_size"])
     print("--------------------------------------------------")
 
     counter = 0
 
     torch.autograd.set_detect_anomaly(True)
 
-    out_path = "./carla/"+config['type']
-    # out_path = "./coarse_search/16_10"
+    out_path = f"./{config['logdir']}/{config['type']}"
     writer = SummaryWriter(logdir=out_path)
 
     if not os.path.exists(out_path):

@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import torch
 import torch.nn as nn
 
 from sklearn.metrics import precision_recall_curve, average_precision_score, PrecisionRecallDisplay, RocCurveDisplay
@@ -16,8 +17,41 @@ from tools.gpn_loss import *
 
 import argparse
 import yaml
+# from sklearn.manifold import TSNE
+from openTSNE import TSNE
+
+import pandas as pd
+
+import matplotlib.pyplot as plt
+import matplotlib.patheffects as PathEffects
+
+import seaborn as sns
+sns.set_style('darkgrid')
+sns.set_palette('muted')
+sns.set_context("notebook", font_scale=1.5,
+                rc={"lines.linewidth": 2.5})
 
 torch.multiprocessing.set_sharing_strategy('file_system')
+
+class_labels = ["vehicle", "road", "lane", "background"]
+
+def scatter(x, colors):
+    cps_df = pd.DataFrame(columns=['CP1', 'CP2', 'target'],
+                          data=np.column_stack((x,
+                                                colors)))
+    cps_df.loc[:, 'target'] = cps_df.target.astype(int)
+    # cps_df[cps_df.columns['target']] = cps_df.target.astype(int)
+    cps_df.head()
+    grid = sns.FacetGrid(cps_df, hue="target", height=10, legend_out=False)
+    plot = grid.map(plt.scatter, 'CP1', 'CP2')
+
+    plot.add_legend()
+
+    for t, l in zip(plot._legend.texts, class_labels):
+        t.set_text(l)
+
+
+    return plot
 
 
 def eval(
@@ -25,14 +59,14 @@ def eval(
 ):
 
     if config['dataset'] == 'carla':
-        train_dataset = CarlaDataset(os.path.join(config['data_path'], "train/"))
+        train_dataset = CarlaDataset(os.path.join("../data/carla/", "train/"))
         train_loader = torch.utils.data.DataLoader(train_dataset,
                                                    batch_size=config['batch_size'],
                                                    shuffle=True,
                                                    num_workers=config['num_workers'],
                                                    drop_last=True)
 
-        val_dataset = CarlaDataset(os.path.join(config['data_path'], "val/"))
+        val_dataset = CarlaDataset(os.path.join("../data/carla/", "val/"))
         val_loader = torch.utils.data.DataLoader(val_dataset,
                                                  batch_size=config['batch_size'],
                                                  shuffle=True,
@@ -48,6 +82,7 @@ def eval(
     if config['type'] == 'baseline_ce':
         activation = torch.softmax
         model = LiftSplatShoot(outC=num_classes)
+        uncertainty_function = entropy
     elif config['type'] == 'baseline_uce':
         activation = activate_uncertainty
         model = LiftSplatShoot(outC=num_classes)
@@ -55,6 +90,7 @@ def eval(
         activation = activate_gpn
         model = LiftSplatShootGPN(outC=num_classes)
         model.bevencode.last = None
+        uncertainty_function = dissonance
     elif config['type'] == 'postnet_uce':
         activation = activate_gpn
         model = LiftSplatShootGPN(outC=num_classes)
@@ -62,6 +98,7 @@ def eval(
     elif config['type'] == 'postnet_uce_cnn':
         activation = activate_gpn
         model = LiftSplatShootGPN(outC=num_classes)
+        print(f"LATENT_SIZE: {model.bevencode.latent_size}")
     else:
         raise ValueError("Please pick a valid model type.")
 
@@ -75,7 +112,7 @@ def eval(
     print("VAL LOADER: ", len(val_loader.dataset))
     print("--------------------------------------------------")
 
-    print('running eval...')
+    print('Running eval...')
 
     total_intersect = [0]*num_classes
     total_union = [0]*num_classes
@@ -83,10 +120,37 @@ def eval(
     y_true = []
     y_scores = []
 
-    out_path = "./outputs/"+config['type']
+    out_path = f"./{config['logdir']}/{config['type']}"
+    tsne = TSNE(n_components=2)
 
     if not os.path.exists(out_path):
         os.makedirs(out_path)
+
+    print("Running TNSE...")
+
+    model.module.bevencode.tnse = True
+
+    tnse_path = os.path.join(out_path, './tsne')
+    if not os.path.exists(tnse_path):
+        os.makedirs(tnse_path)
+
+    for i in range(10):
+        imgs, rots, trans, intrins, post_rots, post_trans, labels = next(iter(val_loader))
+        preds = model(imgs,
+                      rots,
+                      trans,
+                      intrins,
+                      post_rots,
+                      post_trans)
+        labels = labels.to(device).cpu()
+
+        embedding = tsne.fit(preds.view(preds.shape[0]*preds.shape[1], 40000).transpose(0, 1).detach().cpu().numpy())
+        f = scatter(embedding, torch.argmax(labels.view(4, 40000), dim=0).cpu().numpy())
+        f.savefig(os.path.join(tnse_path, f"{config['type']}_{i}.png"))
+
+    model.module.bevencode.tnse = False
+
+    print("Done!")
 
     with torch.no_grad():
         for (imgs, rots, trans, intrins, post_rots, post_trans, labels) in tqdm(val_loader):
@@ -99,8 +163,7 @@ def eval(
                           post_trans)
 
             labels = labels.to(device)
-
-            uncert = entropy(preds)
+            uncert = uncertainty_function(preds)
 
             if config['type'] == 'postnet_uce' \
                     or config['type'] == 'postnet_uce_cnn' \

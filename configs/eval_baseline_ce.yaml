@@ -1,7 +1,0 @@
-data_path: '../data/carla'
-type: 'baseline_ce'
-gpus: [1]
-dataset: 'nuscenes'
-batch_size: 16
-num_workers: 64
-model_path: './tests/baseline_ce/model39000.pt'

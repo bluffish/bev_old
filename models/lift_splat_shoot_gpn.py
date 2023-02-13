@@ -6,7 +6,7 @@ from models.lift_splat_shoot import gen_dx_bx, QuickCumsum, CamEncode, Up
 from models.gpn.density import Density, Evidence
 
 
-def get_class_probalities(self, data):
+def get_class_probalities(data):
     l_c = torch.zeros(data.shape[1], device=data.x.device)
 
     for c in range(data.shape[1]):
@@ -17,6 +17,7 @@ def get_class_probalities(self, data):
     p_c = l_c / L
 
     return p_c
+
 
 class BevEncodeGPN(nn.Module):
     def __init__(self, inC, outC):
@@ -51,6 +52,8 @@ class BevEncodeGPN(nn.Module):
 
         self.last = nn.Conv2d(outC, outC, kernel_size=3, padding=1)
 
+        self.tnse = False
+
     def forward(self, x):
         x = self.conv1(x)
         x = self.bn1(x)
@@ -62,6 +65,8 @@ class BevEncodeGPN(nn.Module):
 
         x = self.up1(x, x1)
         x = self.up2(x)
+
+        x_b = torch.clone(x)
 
         x = x.permute(0, 2, 3, 1).to(x.device)
         x = x.reshape(-1, self.latent_size)
@@ -78,7 +83,11 @@ class BevEncodeGPN(nn.Module):
         if self.last is not None:
             beta = self.last(beta.log()).exp()
         alpha = beta+1
-        return alpha.clamp(min=1e-4)
+
+        if self.tnse:
+            return x_b
+        else:
+            return alpha.clamp(min=1e-4)
 
 
 class LiftSplatShootGPN(nn.Module):
