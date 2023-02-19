@@ -42,6 +42,9 @@ class BevEncodeGPN(nn.Module):
         self.up2 = nn.Sequential(
             nn.Upsample(scale_factor=2, mode='bilinear',
                         align_corners=True),
+            # nn.Conv2d(256, 128, kernel_size=3, padding=1, bias=False),
+            # nn.BatchNorm2d(128),
+            # nn.ReLU(inplace=True),
             nn.Conv2d(256, self.latent_size, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(self.latent_size),
             nn.ReLU(inplace=True),

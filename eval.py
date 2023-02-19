@@ -57,7 +57,6 @@ def scatter(x, colors):
 def eval(
         config
 ):
-
     if config['dataset'] == 'carla':
         train_dataset = CarlaDataset(os.path.join("../data/carla/", "train/"))
         train_loader = torch.utils.data.DataLoader(train_dataset,

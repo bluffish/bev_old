@@ -1,7 +1,7 @@
 type: 'postnet_ce'
-logdir: './outputs'
+logdir: './carla'
 gpus: [1]
 dataset: 'carla'
 batch_size: 1
 num_workers: 64
-model_path: './outputs/postnet_ce/model3000.pt'
+model_path: './carla/postnet_ce2/model30000.pt'

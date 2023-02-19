@@ -1,7 +1,7 @@
 type: 'postnet_ce'
-logdir: './carla'
+logdir: './outputs'
 gpus: [1,2,3,4]
-dataset: 'carla'
+dataset: 'nuscenes'
 batch_size: 64
 num_workers: 64
 weight_decay: 0.0000001
