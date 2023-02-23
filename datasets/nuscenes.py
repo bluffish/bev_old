@@ -65,6 +65,11 @@ def img_transform(img, post_rot, post_tran,
     return img, post_rot, post_tran
 
 
+cvehicle = 0
+croad = 0
+clane = 0
+cbackground = 0
+
 class NuscData(torch.utils.data.Dataset):
     def __init__(self,
                  nusc,
@@ -102,7 +107,6 @@ class NuscData(torch.utils.data.Dataset):
             'Ncams': ncams,
         }
 
-
         self.nusc = nusc
         self.nusc_maps = nusc_maps
         self.is_train = is_train
@@ -118,6 +122,12 @@ class NuscData(torch.utils.data.Dataset):
         for rec in nusc.scene:
             log = nusc.get('log', rec['log_token'])
             self.scene2map[rec['name']] = log['location']
+
+        self.vehicle = 0
+        self.road = 0
+        self.lane = 0
+        self.background = 0
+
 
         print(self)
 
@@ -302,6 +312,24 @@ class NuscData(torch.utils.data.Dataset):
 
         label = np.stack((vehicles, road, lane, empty))
 
+        # global cvehicle
+        # global croad
+        # global clane
+        # global cbackground
+        #
+        # cvehicle += np.count_nonzero(vehicles)
+        # croad += np.count_nonzero(road)
+        # clane += np.count_nonzero(lane)
+        # cbackground += np.count_nonzero(empty)
+        #
+        # tot = cvehicle + croad + clane + cbackground
+        #
+        # print("-----------------------------------------")
+        # print(cvehicle/tot)
+        # print(croad/tot)
+        # print(clane/tot)
+        # print(cbackground/tot)
+
         return torch.tensor(label)
 
     def choose_cams(self):
@@ -342,7 +370,6 @@ def get_nusc_maps(map_folder):
                      "singapore-onenorth",
                  ]}
     return nusc_maps
-
 
 def full_frame(width=None, height=None):
     import matplotlib as mpl
