@@ -75,7 +75,7 @@ class BevEncodeGPN(nn.Module):
         x = x.reshape(-1, self.latent_size)
         p_c = torch.tensor([0.0206, 0.173, 0.0294, 0.777]).to(x.device)
 
-        log_q_ft_per_class = self.flow(x) + p_c.view(1, -1)
+        log_q_ft_per_class = self.flow(x) + p_c.view(1, -1).log()
 
         beta = self.evidence(
             log_q_ft_per_class, dim=self.latent_size,

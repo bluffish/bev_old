@@ -1,6 +1,6 @@
-type: 'postnet_ce'
+type: 'baseline_ce'
 logdir: './carla5'
-gpus: [5,7]
+gpus: [3,4]
 dataset: 'carla'
 batch_size: 32
 num_workers: 64

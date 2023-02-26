@@ -127,27 +127,27 @@ def eval(
 
     print("Running TNSE...")
 
-    model.module.bevencode.tnse = True
-
-    tnse_path = os.path.join(out_path, './tsne')
-    if not os.path.exists(tnse_path):
-        os.makedirs(tnse_path)
-
-    for i in range(10):
-        imgs, rots, trans, intrins, post_rots, post_trans, labels = next(iter(val_loader))
-        preds = model(imgs,
-                      rots,
-                      trans,
-                      intrins,
-                      post_rots,
-                      post_trans)
-        labels = labels.to(device).cpu()
-
-        embedding = tsne.fit(preds.view(preds.shape[0]*preds.shape[1], 40000).transpose(0, 1).detach().cpu().numpy())
-        f = scatter(embedding, torch.argmax(labels.view(4, 40000), dim=0).cpu().numpy())
-        f.savefig(os.path.join(tnse_path, f"{config['type']}_{i}.png"))
-
-    model.module.bevencode.tnse = False
+    # model.module.bevencode.tnse = True
+    #
+    # tnse_path = os.path.join(out_path, './tsne')
+    # if not os.path.exists(tnse_path):
+    #     os.makedirs(tnse_path)
+    #
+    # for i in range(10):
+    #     imgs, rots, trans, intrins, post_rots, post_trans, labels = next(iter(val_loader))
+    #     preds = model(imgs,
+    #                   rots,
+    #                   trans,
+    #                   intrins,
+    #                   post_rots,
+    #                   post_trans)
+    #     labels = labels.to(device).cpu()
+    #
+    #     embedding = tsne.fit(preds.view(preds.shape[0]*preds.shape[1], 40000).transpose(0, 1).detach().cpu().numpy())
+    #     f = scatter(embedding, torch.argmax(labels.view(4, 40000), dim=0).cpu().numpy())
+    #     f.savefig(os.path.join(tnse_path, f"{config['type']}_{i}.png"))
+    #
+    # model.module.bevencode.tnse = False
 
     print("Done!")
 
@@ -196,8 +196,8 @@ def eval(
             tgt = labels.bool()
             intersect = (pred == tgt).type(torch.int64)
 
-            y_true += intersect.tolist()
-            # y_true += labels.cpu().tolist()
+            # y_true += intersect.tolist()
+            y_true += labels.cpu().tolist()
             uncert = -uncert
             y_scores += uncert.tolist()
 
