@@ -1,7 +1,7 @@
-type: 'baseline_uce'
-logdir: './outputs'
-gpus: [0,1]
-dataset: 'nuscenes'
+type: 'enn_ce'
+logdir: './carla'
+gpus: [5,7]
+dataset: 'carla'
 batch_size: 32
 num_workers: 64
 weight_decay: 0.0000001

@@ -48,12 +48,15 @@ def get_val(model, val_loader, device, loss_fn, activation):
 
             if config['type'] == 'postnet_uce' \
                     or config['type'] == 'postnet_uce_cnn' \
-                    or config['type'] == 'baseline_uce':
+                    or config['type'] == 'enn_uce':
                 preds = activation(preds)
                 loss = loss_fn(preds, labels)
             elif config['type'] == 'baseline_ce':
                 loss = loss_fn(preds, labels)
                 preds = activation(preds, dim=1)
+            elif config['type'] == 'enn_ce':
+                preds = activation(preds)
+                loss = loss_fn(preds.log(), torch.argmax(labels, dim=1))
             elif config['type'] == 'postnet_ce':
                 preds = activation(preds)
                 loss = loss_fn(preds.log(), torch.argmax(labels, dim=1))
@@ -120,7 +123,11 @@ def train():
         activation = torch.softmax
         loss_fn = nn.CrossEntropyLoss(weight=torch.tensor([2.0, 1.0, 4.0, 1.0])).cuda(device)
         model = LiftSplatShoot(outC=num_classes)
-    elif config['type'] == 'baseline_uce':
+    elif config['type'] == 'enn_ce':
+        activation = activate_uncertainty
+        loss_fn = torch.nn.NLLLoss(weight=torch.tensor([2.0, 1.0, 4.0, 1.0])).cuda(device)
+        model = LiftSplatShoot(outC=num_classes)
+    elif config['type'] == 'enn_uce':
         activation = activate_uncertainty
         loss_fn = uce_loss
         model = LiftSplatShoot(outC=num_classes)
@@ -141,6 +148,12 @@ def train():
         print(f"LATENT_SIZE: {model.bevencode.latent_size}")
     else:
         raise ValueError("Please pick a valid model type.")
+
+    if config['type'] == 'postnet_ce' and config['type'] == 'postnet_uce' and config['type'] == 'postnet_uce_cnn':
+        if config['dataset'] == 'carla':
+            model.bevencode.p_c = torch.tensor([0.0141, 0.3585, 0.02081, 0.6064])
+        elif config['dataset'] == 'nuscenes':
+            model.bevencode.p_c = torch.tensor([0.0206, 0.173, 0.0294, 0.777])
 
     model = nn.DataParallel(model, device_ids=gpus).to(device).train()
 
@@ -182,12 +195,17 @@ def train():
 
             if config['type'] == 'postnet_uce' \
                     or config['type'] == 'postnet_uce_cnn' \
-                    or config['type'] == 'baseline_uce':
+                    or config['type'] == 'enn_uce':
                 preds = activation(preds)
                 loss = loss_fn(preds, labels)
             elif config['type'] == 'baseline_ce':
                 loss = loss_fn(preds, labels)
                 preds = activation(preds, dim=1)
+            elif config['type'] == 'enn_ce':
+                preds = activation(preds)
+                # print(preds)
+
+                loss = loss_fn(preds.log(), torch.argmax(labels, dim=1))
             elif config['type'] == 'postnet_ce':
                 preds = activation(preds)
                 loss = loss_fn(preds.log(), torch.argmax(labels, dim=1))

@@ -1,8 +1,8 @@
 type: 'postnet_ce'
-logdir: './carla5'
-gpus: [5,7]
+logdir: './carla'
+gpus: [1]
 dataset: 'carla'
-batch_size: 32
+batch_size: 16
 num_workers: 64
 weight_decay: 0.0000001
 learning_rate: 0.001
