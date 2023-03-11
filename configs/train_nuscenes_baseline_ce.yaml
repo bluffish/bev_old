@@ -1,6 +1,6 @@
 type: 'baseline_ce'
-logdir: './outputs'
-gpus: [0,1]
+logdir: 'nuscenes'
+gpus: [1,2]
 dataset: 'nuscenes'
 batch_size: 32
 num_workers: 64

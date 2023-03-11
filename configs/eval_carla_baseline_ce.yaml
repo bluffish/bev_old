@@ -1,5 +1,5 @@
 type: 'baseline_ce'
-logdir: './carla'
+logdir: 'carla'
 gpus: [1]
 dataset: 'carla'
 batch_size: 32

@@ -1,4 +1,4 @@
-efficientnet_pytorch==0.7.1
+eefficientnet_pytorch==0.7.1
 graphviz==0.20.1
 matplotlib==3.4.3
 numpy==1.20.3
@@ -9,12 +9,11 @@ pyblaze==2.3.2
 pyquaternion==0.9.9
 pyro==3.16
 PyYAML==6.0
-rich==13.3.1
-scikit_learn==1.2.1
+rich==13.3.2
+scikit_learn==1.2.2
 seaborn==0.11.2
 tensorboardX==2.6
 torch==1.13.1
-torchshow==0.5.0
 torchvision==0.14.1
 tqdm==4.62.3
 transforms3d==0.4.1

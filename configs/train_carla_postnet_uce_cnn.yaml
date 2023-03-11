@@ -1,6 +1,6 @@
-type: 'baseline_ce'
-logdir: 'mini'
-gpus: [3,4]
+type: 'postnet_uce_cnn'
+logdir: 'carla'
+gpus: [1,7]
 dataset: 'carla'
 batch_size: 32
 num_workers: 64

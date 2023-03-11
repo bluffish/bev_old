@@ -1,11 +1,8 @@
-outputs/
-exp1/
 checkpoints/
 .idea/
 venv/
-wandb/
+nuscenes/
 carla/
-coarse_search/
-outputs_old/
+test/
 
 *.pt

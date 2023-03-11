@@ -1,6 +1,6 @@
 type: 'postnet_ce'
-logdir: './outputs'
-gpus: [1,2]
+logdir: 'nuscenes'
+gpus: [3,4]
 dataset: 'nuscenes'
 batch_size: 32
 num_workers: 64

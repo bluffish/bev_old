@@ -1,7 +1,0 @@
-type: 'postnet_ce'
-logdir: './outputs'
-gpus: [1]
-dataset: 'nuscenes'
-batch_size: 1
-num_workers: 64
-model_path: './outputs/postnet_ce/model43500.pt'

@@ -1,9 +1,14 @@
 from typing import Any
 
+import numpy as np
 import torch
 from torch import nn
 from efficientnet_pytorch import EfficientNet
 from torchvision.models.resnet import resnet18
+
+
+def inverse(x):
+    return torch.tensor(np.linalg.inv(x.cpu().numpy())).to(x.device)
 
 
 def gen_dx_bx(x_bound, y_bound, z_bound):
@@ -162,9 +167,9 @@ class LiftSplatShoot(nn.Module):
     def __init__(
             self,
             x_bound=[-50.0, 50.0, 0.5],
-            y_bound = [-50.0, 50.0, 0.5],
-            z_bound = [-10.0, 10.0, 20.0],
-            d_bound = [4.0, 45.0, 1.0],
+            y_bound=[-50.0, 50.0, 0.5],
+            z_bound=[-10.0, 10.0, 20.0],
+            d_bound=[4.0, 45.0, 1.0],
             final_dim=(128, 352),
             outC=2
     ):
@@ -213,13 +218,13 @@ class LiftSplatShoot(nn.Module):
         # undo post-transformation
         # B x N x D x H x W x 3
         points = self.frustum - post_trans.view(B, N, 1, 1, 1, 3)
-        points = torch.inverse(post_rots).view(B, N, 1, 1, 1, 3, 3).matmul(points.unsqueeze(-1))
+        points = inverse(post_rots).view(B, N, 1, 1, 1, 3, 3).matmul(points.unsqueeze(-1))
 
         # cam_to_ego
         points = torch.cat((points[:, :, :, :, :, :2] * points[:, :, :, :, :, 2:3],
                             points[:, :, :, :, :, 2:3]
                             ), 5)
-        combine = rots.matmul(torch.inverse(intrins))
+        combine = rots.matmul(inverse(intrins))
         points = combine.view(B, N, 1, 1, 1, 3, 3).matmul(points).squeeze(-1)
         points += trans.view(B, N, 1, 1, 1, 3)
 

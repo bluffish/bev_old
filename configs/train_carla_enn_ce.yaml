@@ -1,5 +1,5 @@
 type: 'enn_ce'
-logdir: './carla'
+logdir: 'test'
 gpus: [5,7]
 dataset: 'carla'
 batch_size: 32

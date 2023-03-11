@@ -70,6 +70,7 @@ croad = 0
 clane = 0
 cbackground = 0
 
+
 class NuscData(torch.utils.data.Dataset):
     def __init__(self,
                  nusc,
@@ -459,8 +460,8 @@ def get_local_map(nmap, center, stretch, layer_names, line_names):
     return polys
 
 
-def compile_data(version, dataroot, bsz,
-                 nworkers):
+def compile_data(version, dataroot, batch_size,
+                 num_workers):
     nusc = NuScenes(version='v1.0-{}'.format(version),
                     dataroot=os.path.join(dataroot, version),
                     verbose=False)
@@ -470,13 +471,13 @@ def compile_data(version, dataroot, bsz,
     train_data = NuscData(nusc, nusc_maps, is_train=True)
     val_data = NuscData(nusc, nusc_maps, is_train=False)
 
-    train_loader = torch.utils.data.DataLoader(train_data, batch_size=bsz,
+    train_loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size,
                                                shuffle=True,
-                                               num_workers=nworkers,
+                                               num_workers=num_workers,
                                                drop_last=True,
                                                worker_init_fn=worker_rnd_init)
-    val_loader = torch.utils.data.DataLoader(val_data, batch_size=bsz,
+    val_loader = torch.utils.data.DataLoader(val_data, batch_size=batch_size,
                                              shuffle=False,
-                                             num_workers=nworkers)
+                                             num_workers=num_workers)
 
     return train_loader, val_loader

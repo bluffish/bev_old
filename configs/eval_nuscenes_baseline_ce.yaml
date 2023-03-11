@@ -1,7 +1,0 @@
-type: 'baseline_ce'
-logdir: './outputs'
-gpus: [1]
-dataset: 'nuscenes'
-batch_size: 1
-num_workers: 64
-model_path: './outputs/baseline_ce/model19000.pt'

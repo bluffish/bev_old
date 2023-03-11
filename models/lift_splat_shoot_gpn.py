@@ -1,8 +1,7 @@
-
 import torch
 from torch import nn
 from torchvision.models.resnet import resnet18
-from models.lift_splat_shoot import gen_dx_bx, QuickCumsum, CamEncode, Up
+from models.lift_splat_shoot import gen_dx_bx, QuickCumsum, CamEncode, Up, inverse
 from models.gpn.density import Density, Evidence
 
 
@@ -56,7 +55,7 @@ class BevEncodeGPN(nn.Module):
         self.last = nn.Conv2d(outC, outC, kernel_size=3, padding=1)
 
         self.p_c = torch.tensor([0.0206, 0.173, 0.0294, 0.777])
-        self.tnse = False
+        self.tsne = False
 
     def forward(self, x):
         x = self.conv1(x)
@@ -71,29 +70,22 @@ class BevEncodeGPN(nn.Module):
 
         x_b = torch.clone(x)
 
-        print(x.shape)
         x = x.permute(0, 2, 3, 1).to(x.device)
-        print(x.shape)
         x = x.reshape(-1, self.latent_size)
-        print(x.shape)
         self.p_c = self.p_c.to(x.device)
-        print(self.p_c)
         log_q_ft_per_class = self.flow(x) + self.p_c.view(1, -1).log()
-        print(log_q_ft_per_class.shape)
 
         beta = self.evidence(
             log_q_ft_per_class, dim=self.latent_size,
             further_scale=2.0).exp()
-        print(beta.shape)
 
-        beta = beta.permute(1, 0).reshape(-1, self.outC, 200, 200)
-        print(beta.shape)
-        print("------------------------")
+        beta = beta.reshape(-1, 200, 200, self.outC).permute(0, 3, 1, 2).contiguous()
+
         if self.last is not None:
             beta = self.last(beta.log()).exp()
-        alpha = beta+1
+        alpha = beta + 1
 
-        if self.tnse:
+        if self.tsne:
             return x_b
         else:
             return alpha.clamp(min=1e-4)

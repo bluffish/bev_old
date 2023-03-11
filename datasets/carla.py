@@ -29,6 +29,7 @@ def mask(img, target):
     m = np.all(img == target, axis=2).astype(int)
     return m
 
+
 def get_rot(h):
     return torch.Tensor([
         [np.cos(h), np.sin(h)],
@@ -106,7 +107,7 @@ class CarlaDataset(torch.utils.data.Dataset):
         self.is_train = is_train
 
     def __len__(self):
-        return self.vehicles * self.ticks
+        return int((self.vehicles * self.ticks) / 20)
 
     def __getitem__(self, idx):
         agent_number = math.floor(idx / self.ticks)
@@ -258,3 +259,19 @@ class CarlaDataset(torch.utils.data.Dataset):
             rotate = 0
 
         return resize, resize_dims, crop, flip, rotate
+
+
+def compile_data(dataroot, batch_size, num_workers):
+    train_loader = torch.utils.data.DataLoader(CarlaDataset(os.path.join(dataroot, "train/")),
+                                               batch_size=batch_size,
+                                               shuffle=True,
+                                               num_workers=num_workers,
+                                               drop_last=True)
+
+    val_loader = torch.utils.data.DataLoader(CarlaDataset(os.path.join(dataroot, "val/")),
+                                             batch_size=batch_size,
+                                             shuffle=True,
+                                             num_workers=num_workers,
+                                             drop_last=True)
+
+    return train_loader, val_loader

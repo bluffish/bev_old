@@ -3,7 +3,7 @@ from tqdm import tqdm
 from datasets.nuscenes import compile_data
 from datasets.carla import CarlaDataset
 
-from tools.gpn_loss import *
+from tools.loss import *
 import os
 
 import seaborn as sns

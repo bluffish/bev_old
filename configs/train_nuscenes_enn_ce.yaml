@@ -1,7 +1,7 @@
-type: 'baseline_ce'
-logdir: 'mini'
-gpus: [3,4]
-dataset: 'carla'
+type: 'enn_ce'
+logdir: 'nuscenes'
+gpus: [2,3]
+dataset: 'nuscenes'
 batch_size: 32
 num_workers: 64
 weight_decay: 0.0000001

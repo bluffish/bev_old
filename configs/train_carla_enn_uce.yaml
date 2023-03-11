@@ -1,5 +1,5 @@
-type: 'baseline_ce'
-logdir: 'mini'
+type: 'enn_uce'
+logdir: 'test'
 gpus: [3,4]
 dataset: 'carla'
 batch_size: 32
@@ -7,4 +7,5 @@ num_workers: 64
 weight_decay: 0.0000001
 learning_rate: 0.001
 num_epochs: 100
-val_step: 1000
+val_step: 200
+pretrained: './carla/enn_ce/model100000.pt'

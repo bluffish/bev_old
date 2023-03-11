@@ -1,5 +1,5 @@
-type: 'baseline_ce'
-logdir: 'mini'
+type: 'postnet_ce_cnn'
+logdir: 'carla'
 gpus: [3,4]
 dataset: 'carla'
 batch_size: 32
