@@ -64,12 +64,6 @@ def img_transform(img, post_rot, post_tran,
     return img, post_rot, post_tran
 
 
-cvehicle = 0
-croad = 0
-clane = 0
-cbackground = 0
-
-
 class CarlaDataset(torch.utils.data.Dataset):
     def __init__(
             self,
@@ -107,7 +101,8 @@ class CarlaDataset(torch.utils.data.Dataset):
         self.is_train = is_train
 
     def __len__(self):
-        return int((self.vehicles * self.ticks) / 20)
+        return 128
+        # return self.vehicles * self.ticks
 
     def __getitem__(self, idx):
         agent_number = math.floor(idx / self.ticks)
@@ -139,24 +134,6 @@ class CarlaDataset(torch.utils.data.Dataset):
         label = np.stack((vehicles, road, lane, empty))
 
         label = torch.tensor(label)
-
-        # global cvehicle
-        # global croad
-        # global clane
-        # global cbackground
-        #
-        # cvehicle += np.count_nonzero(label[0])
-        # croad += np.count_nonzero(label[1])
-        # clane += np.count_nonzero(label[2])
-        # cbackground += np.count_nonzero(label[3])
-        #
-        # tot = cvehicle + croad + clane + cbackground
-        #
-        # print("-----------------------------------------")
-        # print(cvehicle/tot)
-        # print(croad/tot)
-        # print(clane/tot)
-        # print(cbackground/tot)
 
         for sensor_name, sensor_info in self.sensors_info['sensors'].items():
             if sensor_info["sensor_type"] == "sensor.camera.rgb" and sensor_name != "birds_view_camera":

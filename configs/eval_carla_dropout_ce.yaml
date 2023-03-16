@@ -1,0 +1,8 @@
+type: 'dropout_ce'
+logdir: 'carla/dropout_ce'
+gpus: [0]
+dataset: 'carla'
+batch_size: 32
+num_workers: 64
+model_path: './carla/dropout_ce/best.pt'
+tsne: false

@@ -1,7 +1,7 @@
-type: 'postnet_ce'
-logdir: 'nuscenes/postnet_ce'
+type: 'dropout_ce'
+logdir: 'carla/dropout_ce'
 gpus: [3,4]
-dataset: 'nuscenes'
+dataset: 'carla'
 batch_size: 32
 num_workers: 64
 weight_decay: 0.0000001

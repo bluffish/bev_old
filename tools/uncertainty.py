@@ -10,11 +10,29 @@ def activate_uncertainty(output):
     return prob
 
 
+def entropy_dropout(pred):
+    mean = []
+
+    for p in pred:
+        prob_i = softmax(p)
+        mean.append(prob_i)
+
+    mean = np.mean(mean, axis=0)
+    class_num = mean.shape[1]
+    prob = mean
+
+    entropy = - prob * (np.log(prob) / np.log(class_num))
+    total_un = np.sum(entropy, axis=1, keepdims=True)
+
+    return total_un
+
+
 def dissonance(mean):
     mean = mean.cpu().numpy()
     evidence = mean + 1.0
     alpha = mean + 2.0
     S = np.sum(alpha, axis=1, keepdims=True)
+    # S = alpha
     belief = evidence / S
     dis_un = np.zeros_like(S)
     for k in range(belief.shape[0]):
@@ -45,7 +63,7 @@ def entropy(pred):
     entropy = - prob * (np.log(prob) / np.log(class_num))
 
     total_un = np.sum(entropy, axis=1, keepdims=True)
-    class_un = entropy
+
     return total_un
 
 

@@ -1,8 +1,8 @@
-type: 'postnet_ce_cnn'
-logdir: 'carla/postnet_ce_cnn'
-gpus: [3,4]
+type: 'ensemble_ce'
+logdir: 'carla/ensemble_ce'
+gpus: [1,2,3,4]
 dataset: 'carla'
-batch_size: 32
+batch_size: 16
 num_workers: 64
 weight_decay: 0.0000001
 learning_rate: 0.001

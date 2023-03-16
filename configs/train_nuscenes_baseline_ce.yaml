@@ -1,5 +1,5 @@
 type: 'baseline_ce'
-logdir: 'nuscenes'
+logdir: 'nuscenes/baseline_ce'
 gpus: [1,2]
 dataset: 'nuscenes'
 batch_size: 32

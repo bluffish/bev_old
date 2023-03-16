@@ -1,5 +1,5 @@
 type: 'postnet_ce_cnn'
-logdir: 'nuscenes'
+logdir: 'nuscenes/postnet_ce_cnn'
 gpus: [5,6]
 dataset: 'nuscenes'
 batch_size: 32

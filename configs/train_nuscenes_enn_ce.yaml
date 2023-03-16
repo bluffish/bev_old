@@ -1,5 +1,5 @@
 type: 'enn_ce'
-logdir: 'nuscenes'
+logdir: 'nuscenes/enn_ce'
 gpus: [2,3]
 dataset: 'nuscenes'
 batch_size: 32

@@ -56,6 +56,10 @@ class Up(nn.Module):
     def __init__(self, in_channels, out_channels, scale_factor=2):
         super().__init__()
 
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.scale_factor = scale_factor
+
         self.up = nn.Upsample(scale_factor=scale_factor, mode='bilinear',
                               align_corners=True)
 
@@ -137,6 +141,7 @@ class BevEncode(nn.Module):
         self.layer3 = trunk.layer3
 
         self.up1 = Up(64 + 256, 256, scale_factor=4)
+
         self.up2 = nn.Sequential(
             nn.Upsample(scale_factor=2, mode='bilinear',
                         align_corners=True),
@@ -146,7 +151,7 @@ class BevEncode(nn.Module):
             nn.Conv2d(128, outC, kernel_size=1, padding=0),
         )
 
-        self.tnse = False
+        self.tsne = False
 
     def forward(self, x):
         x = self.conv1(x)
@@ -171,12 +176,13 @@ class LiftSplatShoot(nn.Module):
             z_bound=[-10.0, 10.0, 20.0],
             d_bound=[4.0, 45.0, 1.0],
             final_dim=(128, 352),
-            outC=2
+            outC=4
     ):
         super(LiftSplatShoot, self).__init__()
 
         self.d_bound = d_bound
         self.final_dim = final_dim
+        self.outC = outC
 
         dx, bx, nx = gen_dx_bx(x_bound,
                                y_bound,
@@ -193,7 +199,6 @@ class LiftSplatShoot(nn.Module):
         self.D, _, _, _ = self.frustum.shape
         self.camencode = CamEncode(self.D, self.camC)
         self.bevencode = BevEncode(inC=self.camC, outC=outC)
-
 
     def create_frustum(self):
         # make grid in image plane
@@ -295,4 +300,5 @@ class LiftSplatShoot(nn.Module):
     def forward(self, x, rots, trans, intrins, post_rots, post_trans):
         x = self.get_voxels(x, rots, trans, intrins, post_rots, post_trans)
         x = self.bevencode(x)
+
         return x

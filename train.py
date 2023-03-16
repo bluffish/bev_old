@@ -5,7 +5,6 @@ from tensorboardX import SummaryWriter
 
 from datasets.carla import compile_data as compile_data_carla
 from datasets.nuscenes import compile_data as compile_data_nuscenes
-from pathlib import Path
 
 from tools.utils import *
 
@@ -73,13 +72,8 @@ def train():
 
     opt = torch.optim.Adam(model.parameters(), lr=config['learning_rate'], weight_decay=config['weight_decay'])
 
-    if len(Path(config['logdir']).parents) == 1:
-        out_path = f"./{config['logdir']}/{config['type']}"
-    else:
-        out_path = config['logdir']
-
-    if not os.path.exists(out_path):
-        os.makedirs(out_path)
+    if not os.path.exists(config['logdir']):
+        os.makedirs(config['logdir'])
 
     print("--------------------------------------------------")
     print(f"Starting training on {config['type']} model")
@@ -88,14 +82,14 @@ def train():
     print(f"TRAIN LOADER: {len(train_loader.dataset)}")
     print(f"VAL LOADER: {len(val_loader.dataset)}")
     print(f"BATCH SIZE: {config['batch_size']}")
-    print(f"OUTPUT DIRECTORY {out_path} ")
+    print(f"OUTPUT DIRECTORY {config['logdir']} ")
     print("--------------------------------------------------")
 
     counter = 0
 
     torch.autograd.set_detect_anomaly(True)
 
-    writer = SummaryWriter(logdir=out_path)
+    writer = SummaryWriter(logdir=config['logdir'])
 
     best = 0.0
 
@@ -119,7 +113,7 @@ def train():
             if counter % 10 == 0:
                 print(counter, loss.item())
                 writer.add_scalar('train/loss', loss, counter)
-                save_pred(preds, labels, out_path)
+                save_pred(preds, labels, config['logdir'])
 
             if counter % 50 == 0:
                 intersection, union = get_iou(preds, labels)
@@ -140,14 +134,14 @@ def train():
                 val_loss, val_iou = get_val(model, val_loader, device, loss_fn, activation, num_classes)
                 print(f"VAL loss: {val_loss}, iou: {val_iou},  average: {best}")
 
-                save_path = os.path.join(out_path, f"model{counter}.pt")
+                save_path = os.path.join(config['logdir'], f"model{counter}.pt")
                 print(f"Saving Model: {save_path}")
                 torch.save(model.state_dict(), save_path)
 
                 if sum(val_iou) / len(val_iou) >= best:
                     best = sum(val_iou) / len(val_iou)
                     print(f"New best model found. iou: {val_iou}")
-                torch.save(model.state_dict(), os.path.join(out_path, "best.pt"))
+                torch.save(model.state_dict(), os.path.join(config['logdir'], "best.pt"))
 
                 model.train()
 
@@ -159,11 +153,18 @@ def train():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+
     parser.add_argument("config")
+    parser.add_argument('-g', '--gpus', nargs='+', required=False)
+
     args = parser.parse_args()
+
     print(f"Using config {args.config}")
 
     with open(args.config, 'r') as file:
         config = yaml.safe_load(file)
+
+    if not args.gpus is None:
+        config['gpus'] = [int(i) for i in args.gpus]
 
     train()

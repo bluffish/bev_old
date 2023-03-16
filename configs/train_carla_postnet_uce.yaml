@@ -1,5 +1,5 @@
 type: 'postnet_uce'
-logdir: 'carla'
+logdir: 'carla/postnet_uce'
 gpus: [2,5]
 dataset: 'carla'
 batch_size: 32
@@ -8,3 +8,4 @@ weight_decay: 0.0000001
 learning_rate: 0.001
 num_epochs: 100
 val_step: 1000
+pretrained: './carla/postnet_ce/best.pt'

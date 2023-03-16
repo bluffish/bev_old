@@ -1,5 +1,5 @@
 type: 'enn_uce'
-logdir: 'test'
+logdir: 'carla/enn_uce'
 gpus: [3,4]
 dataset: 'carla'
 batch_size: 32
@@ -8,4 +8,4 @@ weight_decay: 0.0000001
 learning_rate: 0.001
 num_epochs: 100
 val_step: 200
-pretrained: './carla/enn_ce/model100000.pt'
+pretrained: './carla/enn_ce/best.pt'

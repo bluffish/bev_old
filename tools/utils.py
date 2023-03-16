@@ -5,7 +5,10 @@ import os
 import numpy as np
 
 from models.lift_splat_shoot import *
+from models.lift_splat_shoot_ensemble import *
 from models.lift_splat_shoot_gpn import *
+from models.lift_splat_shoot_dropout import *
+
 from tools.loss import *
 from tools.uncertainty import *
 
@@ -37,8 +40,8 @@ def get_step(preds, labels, activation, loss_fn, type):
     if type == 'postnet_uce' or type == 'postnet_uce_cnn' or type == 'enn_uce':
         preds = activation(preds)
         return preds, loss_fn(preds, labels)
-    elif type == 'baseline_ce':
-        return activation(preds, dim=1), loss_fn(preds, labels)
+    elif type == 'baseline_ce' or type == 'dropout_ce' or type == 'ensemble_ce':
+        return activation(preds, dim=1), loss_fn(preds.cpu(), labels.cpu())
     elif type == 'enn_ce' or type == 'postnet_ce' or type == 'postnet_ce_cnn':
         preds = activation(preds)
         return preds, loss_fn(preds.log().cpu(), torch.argmax(labels, dim=1).cpu())
@@ -54,7 +57,7 @@ def get_model(type, num_classes):
         loss_fn = torch.nn.NLLLoss(weight=torch.tensor([2.0, 1.0, 4.0, 1.0]))
         model = LiftSplatShoot(outC=num_classes)
     elif type == 'enn_uce':
-        activation = activate_uncertainty
+        activation = activate_gpn
         loss_fn = uce_loss
         model = LiftSplatShoot(outC=num_classes)
     elif type == 'postnet_ce':
@@ -75,6 +78,14 @@ def get_model(type, num_classes):
         activation = activate_gpn
         loss_fn = uce_loss
         model = LiftSplatShootGPN(outC=num_classes)
+    elif type == 'dropout_ce':
+        activation = torch.softmax
+        loss_fn = nn.CrossEntropyLoss(weight=torch.tensor([2.0, 1.0, 4.0, 1.0]))
+        model = LiftSplatShootDropout(outC=num_classes)
+    elif type == 'ensemble_ce':
+        activation = torch.softmax
+        loss_fn = nn.CrossEntropyLoss(weight=torch.tensor([2.0, 1.0, 4.0, 1.0]))
+        model = LiftSplatShootEnsemble(outC=num_classes)
     else:
         raise ValueError("Please pick a valid model type.")
 

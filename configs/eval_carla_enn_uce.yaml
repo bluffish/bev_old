@@ -1,0 +1,8 @@
+type: 'enn_uce'
+logdir: 'carla/enn_uce'
+gpus: [0]
+dataset: 'carla'
+batch_size: 32
+num_workers: 64
+model_path: './carla/enn_uce/model100000.pt'
+tsne: false
