@@ -39,20 +39,11 @@ def get_val(model, val_loader, device, loss_fn, activation, num_classes):
 
 
 def train():
-    if config['dataset'] == 'carla':
-        train_loader, val_loader = compile_data_carla("../data/carla", config["batch_size"],
-                                                      config['num_workers'])
-    elif config['dataset'] == 'nuscenes':
-        train_loader, val_loader = compile_data_nuscenes("trainval", "../data/nuscenes", config["batch_size"],
-                                                         config['num_workers'])
-    else:
-        raise ValueError("Please pick a valid dataset.")
+    compile_data = compile_data_carla if config['dataset'] == 'carla' else compile_data_nuscenes
+    train_loader, val_loader = compile_data("../data/carla", config["batch_size"], config['num_workers'])
 
-    gpus = config['gpus']
-    device = torch.device('cpu') if len(gpus) < 0 else torch.device(f'cuda:{gpus[0]}')
-
-    num_classes = 4
-    classes = ["vehicle", "road", "lane", "background"]
+    device = torch.device(f"cuda:{config['gpus'][0]}" if config['gpus'] else 'cpu')
+    num_classes, classes = 4, ["vehicle", "road", "lane", "background"]
 
     class_proportions = {
         "nuscenes": [0.0206, 0.173, 0.0294, 0.777],
@@ -64,7 +55,7 @@ def train():
     if "postnet" in config['type']:
         model.bevencode.p_c = torch.tensor(class_proportions[config['dataset']])
 
-    model = nn.DataParallel(model, device_ids=gpus).to(device).train()
+    model = nn.DataParallel(model, device_ids=config['gpus']).to(device).train()
 
     if "pretrained" in config:
         print(f"Loading pretrained weights from {config['pretrained']}")
@@ -72,12 +63,11 @@ def train():
 
     opt = torch.optim.Adam(model.parameters(), lr=config['learning_rate'], weight_decay=config['weight_decay'])
 
-    if not os.path.exists(config['logdir']):
-        os.makedirs(config['logdir'])
+    os.makedirs(config['logdir'], exist_ok=True)
 
     print("--------------------------------------------------")
     print(f"Starting training on {config['type']} model")
-    print(f"Using GPUS: {gpus}")
+    print(f"Using GPUS: {config['gpus']}")
     print("Training using CARLA")
     print(f"TRAIN LOADER: {len(train_loader.dataset)}")
     print(f"VAL LOADER: {len(val_loader.dataset)}")
@@ -85,13 +75,11 @@ def train():
     print(f"OUTPUT DIRECTORY {config['logdir']} ")
     print("--------------------------------------------------")
 
-    counter = 0
-
     torch.autograd.set_detect_anomaly(True)
-
     writer = SummaryWriter(logdir=config['logdir'])
 
     best = 0.0
+    counter = 0
 
     for epoch in range(config['num_epochs']):
         for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, labels) in enumerate(
@@ -164,7 +152,7 @@ if __name__ == "__main__":
     with open(args.config, 'r') as file:
         config = yaml.safe_load(file)
 
-    if not args.gpus is None:
+    if args.gpus is not None:
         config['gpus'] = [int(i) for i in args.gpus]
 
     train()

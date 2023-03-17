@@ -28,7 +28,6 @@ class LiftSplatShootDropout(LiftSplatShoot):
         self.tests = -1
 
     def forward(self, x, rots, trans, intrins, post_rots, post_trans):
-
         if self.tests > 0:
             outputs = []
 
