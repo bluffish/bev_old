@@ -1,4 +1,3 @@
-import os
 from time import time
 
 from tensorboardX import SummaryWriter
@@ -11,6 +10,8 @@ from tools.utils import *
 import argparse
 import yaml
 from tqdm import tqdm
+
+torch.manual_seed(0)
 
 
 def get_val(model, val_loader, device, loss_fn, activation, num_classes):
@@ -40,9 +41,10 @@ def get_val(model, val_loader, device, loss_fn, activation, num_classes):
 
 def train():
     compile_data = compile_data_carla if config['dataset'] == 'carla' else compile_data_nuscenes
-    train_loader, val_loader = compile_data("../data/carla", config["batch_size"], config['num_workers'])
+    train_loader, val_loader = compile_data("trainval", f"../data/{config['dataset']}",
+                                            config["batch_size"], config['num_workers'])
 
-    device = torch.device(f"cuda:{config['gpus'][0]}" if config['gpus'] else 'cpu')
+    device = torch.device('cpu') if len(config['gpus']) < 0 else torch.device(f'cuda:{config["gpus"][0]}')
     num_classes, classes = 4, ["vehicle", "road", "lane", "background"]
 
     class_proportions = {
@@ -50,7 +52,7 @@ def train():
         "carla": [0.0141, 0.3585, 0.02081, 0.6064]
     }
 
-    activation, loss_fn, model = get_model(config['type'], num_classes)
+    activation, loss_fn, model = get_model(config['type'], num_classes, device)
 
     if "postnet" in config['type']:
         model.bevencode.p_c = torch.tensor(class_proportions[config['dataset']])
@@ -79,7 +81,7 @@ def train():
     writer = SummaryWriter(logdir=config['logdir'])
 
     best = 0.0
-    counter = 0
+    counter = 11000
 
     for epoch in range(config['num_epochs']):
         for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, labels) in enumerate(
@@ -93,7 +95,7 @@ def train():
             preds, loss = get_step(preds, labels, activation, loss_fn, config['type'])
 
             loss.backward(retain_graph=True)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+            nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             opt.step()
             counter += 1
             t1 = time()

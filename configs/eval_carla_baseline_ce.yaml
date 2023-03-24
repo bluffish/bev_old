@@ -2,7 +2,7 @@ type: 'baseline_ce'
 logdir: 'carla/baseline_ce'
 gpus: [0]
 dataset: 'carla'
-batch_size: 32
+batch_size: 128
 num_workers: 64
 model_path: './carla/baseline_ce/model58000.pt'
-tsne: true
+tsne: false

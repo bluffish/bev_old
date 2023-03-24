@@ -14,6 +14,7 @@ import yaml
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from torch import nn
 
 sns.set_style('darkgrid')
 sns.set_palette('muted')
@@ -39,9 +40,9 @@ def scatter(x, classes, colors):
 
 def eval():
     compile_data = compile_data_carla if config['dataset'] == 'carla' else compile_data_nuscenes
-    train_loader, val_loader = compile_data("../data/carla", config["batch_size"], config['num_workers'])
+    train_loader, val_loader = compile_data("trainval", f"../data/{config['dataset']}", config["batch_size"], config['num_workers'])
 
-    device = torch.device(f"cuda:{config['gpus'][0]}" if config['gpus'] else 'cpu')
+    device = torch.device('cpu') if len(config['gpus']) < 0 else torch.device(f'cuda:{config["gpus"][0]}')
     num_classes, classes = 4, ["vehicle", "road", "lane", "background"]
 
     class_proportions = {
@@ -49,7 +50,7 @@ def eval():
         "carla": [0.0141, 0.3585, 0.02081, 0.6064]
     }
 
-    activation, loss_fn, model = get_model(config['type'], num_classes)
+    activation, loss_fn, model = get_model(config['type'], num_classes, device)
 
     if "uce" in config['type']:
         uncertainty_function = dissonance
@@ -59,7 +60,7 @@ def eval():
     if "postnet" in config['type']:
         model.bevencode.p_c = torch.tensor(class_proportions[config['dataset']])
 
-    model = nn.DataParallel(model, device_ids=config['gpus']).to(device).train()
+    model = nn.DataParallel(model, device_ids=config['gpus']).to(device).eval()
     model.load_state_dict(torch.load(config['model_path']))
 
     if config['type'] == "dropout_ce":
@@ -69,7 +70,7 @@ def eval():
     print("--------------------------------------------------")
     print(f"Starting eval on {config['type']} model")
     print(f"Using GPUS: {config['gpus']}")
-    print("Training using CARLA ")
+    print(f"Eval using {config['dataset']} ")
     print("VAL LOADER: ", len(val_loader.dataset))
     print(f"OUTPUT DIRECTORY {config['logdir']} ")
     print("--------------------------------------------------")
@@ -128,16 +129,17 @@ def eval():
             plt.imsave(os.path.join(config['logdir'], "uncertainty_map.jpg"),
                        plt.cm.jet(uncertainty[0][0]))
 
-            for j in range(num_classes):
-                mask = np.logical_or(preds[:, j, :, :].cpu() > 0.5, labels[:, j, :, :].cpu() == 1).bool()
+            pmax = torch.argmax(preds, dim=1)
+            lmax = torch.argmax(labels, dim=1)
 
-                p = preds[:, j, :, :][mask].ravel()
-                l = labels[:, j, :, :][mask].ravel()
+            for j in range(num_classes):
+                mask = np.logical_or(pmax.cpu() == j, labels[:, j, :, :].cpu() == 1).bool()
+
+                p = pmax[mask].ravel()
+                l = lmax[mask].ravel()
                 u = torch.tensor(uncertainty[:, 0, :, :][mask]).ravel()
 
-                p = (p > 0.5)
-                tgt = l.bool()
-                intersect = (p == tgt).type(torch.int64)
+                intersect = (p == l).type(torch.int64)
 
                 y_true[j] += intersect.tolist()
                 u = -u

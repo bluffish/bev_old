@@ -60,6 +60,7 @@ class BevEncodeGPN(nn.Module):
         x1 = self.layer1(x)
         x = self.layer2(x1)
         x = self.layer3(x)
+
         x = self.up1(x, x1)
         x = self.up2(x)
 

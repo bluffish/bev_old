@@ -1,5 +1,5 @@
-type: 'postnet_ce'
-logdir: 'nuscenes/postnet_ce'
+type: 'enn_uce'
+logdir: 'nuscenes/enn_uce'
 gpus: [2,3]
 dataset: 'nuscenes'
 batch_size: 32
@@ -7,5 +7,5 @@ num_workers: 64
 weight_decay: 0.0000001
 learning_rate: 0.001
 num_epochs: 100
-val_step: 1000
-pretrained: "./nuscenes/postnet_ce/best.pt"
+val_step: 200
+pretrained: './carla/enn_ce/best.pt'

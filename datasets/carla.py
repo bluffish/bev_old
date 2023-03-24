@@ -81,7 +81,7 @@ class CarlaDataset(torch.utils.data.Dataset):
         self.type = type
         self.vehicles = len(os.listdir(os.path.join(self.data_path, 'agents')))
         self.ticks = len(os.listdir(os.path.join(self.data_path, 'agents/0/back_camera')))
-
+        self.length = self.ticks*self.vehicles
         self.normalize_img = torchvision.transforms.Compose((
             torchvision.transforms.ToTensor(),
             torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406],
@@ -101,8 +101,7 @@ class CarlaDataset(torch.utils.data.Dataset):
         self.is_train = is_train
 
     def __len__(self):
-        return 128
-        # return self.vehicles * self.ticks
+        return self.length
 
     def __getitem__(self, idx):
         agent_number = math.floor(idx / self.ticks)
@@ -238,14 +237,21 @@ class CarlaDataset(torch.utils.data.Dataset):
         return resize, resize_dims, crop, flip, rotate
 
 
-def compile_data(dataroot, batch_size, num_workers):
-    train_loader = torch.utils.data.DataLoader(CarlaDataset(os.path.join(dataroot, "train/")),
+def compile_data(version, dataroot, batch_size, num_workers):
+    train_dataset = CarlaDataset(os.path.join(dataroot, "train/"))
+    val_dataset = CarlaDataset(os.path.join(dataroot, "val/"))
+
+    if version == "mini":
+        train_dataset.length = 128
+        val_dataset.length = 128
+
+    train_loader = torch.utils.data.DataLoader(train_dataset,
                                                batch_size=batch_size,
                                                shuffle=True,
                                                num_workers=num_workers,
                                                drop_last=True)
 
-    val_loader = torch.utils.data.DataLoader(CarlaDataset(os.path.join(dataroot, "val/")),
+    val_loader = torch.utils.data.DataLoader(val_dataset,
                                              batch_size=batch_size,
                                              shuffle=True,
                                              num_workers=num_workers,

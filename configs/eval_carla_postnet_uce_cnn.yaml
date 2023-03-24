@@ -4,5 +4,5 @@ gpus: [0,1]
 dataset: 'carla'
 batch_size: 32
 num_workers: 64
-model_path: './carla/postnet_uce_cnn_init/best.pt'
+model_path: './carla/postnet_uce_cnn/best.pt'
 tsne: false

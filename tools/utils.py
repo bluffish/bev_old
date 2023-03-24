@@ -1,13 +1,12 @@
-import torch
+from torch import nn
+
 import cv2
 import os
 
-import numpy as np
-
-from models.lift_splat_shoot import *
-from models.lift_splat_shoot_ensemble import *
-from models.lift_splat_shoot_gpn import *
-from models.lift_splat_shoot_dropout import *
+from models.lift_splat_shoot import LiftSplatShoot
+from models.lift_splat_shoot_ensemble import LiftSplatShootEnsemble
+from models.lift_splat_shoot_gpn import LiftSplatShootGPN
+from models.lift_splat_shoot_dropout import LiftSplatShootDropout
 
 from tools.loss import *
 from tools.uncertainty import *
@@ -39,22 +38,25 @@ def get_iou(preds, labels):
 def get_step(preds, labels, activation, loss_fn, type):
     if type == 'postnet_uce' or type == 'postnet_uce_cnn' or type == 'enn_uce':
         preds = activation(preds)
-        return preds, loss_fn(preds, labels)
+        loss = loss_fn(preds, labels)
     elif type == 'baseline_ce' or type == 'dropout_ce' or type == 'ensemble_ce':
-        return activation(preds, dim=1), loss_fn(preds.cpu(), labels.cpu())
+        loss = loss_fn(preds, labels)
+        preds = activation(preds, dim=1)
     elif type == 'enn_ce' or type == 'postnet_ce' or type == 'postnet_ce_cnn':
         preds = activation(preds)
-        return preds, loss_fn(preds.log().cpu(), torch.argmax(labels, dim=1).cpu())
+        loss = loss_fn(preds.log(), torch.argmax(labels, dim=1))
+
+    return preds, loss
 
 
-def get_model(type, num_classes):
+def get_model(type, num_classes, device):
     if type == 'baseline_ce':
         activation = torch.softmax
-        loss_fn = nn.CrossEntropyLoss(weight=torch.tensor([2.0, 1.0, 4.0, 1.0]))
+        loss_fn = torch.nn.CrossEntropyLoss(weight=torch.tensor([2.0, 1.0, 4.0, 1.0])).cuda(device)
         model = LiftSplatShoot(outC=num_classes)
     elif type == 'enn_ce':
         activation = activate_uncertainty
-        loss_fn = torch.nn.NLLLoss(weight=torch.tensor([2.0, 1.0, 4.0, 1.0]))
+        loss_fn = torch.nn.NLLLoss(weight=torch.tensor([2.0, 1.0, 4.0, 1.0])).cuda(device)
         model = LiftSplatShoot(outC=num_classes)
     elif type == 'enn_uce':
         activation = activate_gpn
@@ -62,12 +64,12 @@ def get_model(type, num_classes):
         model = LiftSplatShoot(outC=num_classes)
     elif type == 'postnet_ce':
         activation = activate_gpn
-        loss_fn = torch.nn.NLLLoss(weight=torch.tensor([2.0, 1.0, 4.0, 1.0]))
+        loss_fn = torch.nn.NLLLoss(weight=torch.tensor([2.0, 1.0, 4.0, 1.0])).cuda(device)
         model = LiftSplatShootGPN(outC=num_classes)
         model.bevencode.last = None
     elif type == 'postnet_ce_cnn':
         activation = activate_gpn
-        loss_fn = torch.nn.NLLLoss(weight=torch.tensor([2.0, 1.0, 4.0, 1.0]))
+        loss_fn = torch.nn.NLLLoss(weight=torch.tensor([2.0, 1.0, 4.0, 1.0])).cuda(device)
         model = LiftSplatShootGPN(outC=num_classes)
     elif type == 'postnet_uce':
         activation = activate_gpn
@@ -80,11 +82,11 @@ def get_model(type, num_classes):
         model = LiftSplatShootGPN(outC=num_classes)
     elif type == 'dropout_ce':
         activation = torch.softmax
-        loss_fn = nn.CrossEntropyLoss(weight=torch.tensor([2.0, 1.0, 4.0, 1.0]))
+        loss_fn = nn.CrossEntropyLoss(weight=torch.tensor([2.0, 1.0, 4.0, 1.0])).cuda(device)
         model = LiftSplatShootDropout(outC=num_classes)
     elif type == 'ensemble_ce':
         activation = torch.softmax
-        loss_fn = nn.CrossEntropyLoss(weight=torch.tensor([2.0, 1.0, 4.0, 1.0]))
+        loss_fn = nn.CrossEntropyLoss(weight=torch.tensor([2.0, 1.0, 4.0, 1.0])).cuda(device)
         model = LiftSplatShootEnsemble(outC=num_classes)
     else:
         raise ValueError("Please pick a valid model type.")

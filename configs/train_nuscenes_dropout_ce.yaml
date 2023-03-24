@@ -1,7 +1,7 @@
-type: 'baseline_ce'
-logdir: './carla/baseline_ce'
-gpus: [0,1]
-dataset: 'carla'
+type: 'dropout_ce'
+logdir: 'nuscenes/dropout_ce'
+gpus: [3,4]
+dataset: 'nuscenes'
 batch_size: 32
 num_workers: 64
 weight_decay: 0.0000001
