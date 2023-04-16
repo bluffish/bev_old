@@ -1,8 +1,0 @@
-type: 'baseline_ce'
-logdir: 'nuscenes/baseline_ce'
-gpus: [0,1]
-dataset: 'nuscenes'
-batch_size: 32
-num_workers: 64
-model_path: './nuscenes/baseline_ce/best.pt'
-tsne: false

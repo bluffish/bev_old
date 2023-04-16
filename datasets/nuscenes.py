@@ -16,10 +16,29 @@ import torchvision
 
 from datasets.carla import mask
 
+
+class NormalizeInverse(torchvision.transforms.Normalize):
+    def __init__(self, mean, std):
+        mean = torch.as_tensor(mean)
+        std = torch.as_tensor(std)
+        std_inv = 1 / (std + 1e-7)
+        mean_inv = -mean * std_inv
+        super().__init__(mean=mean_inv, std=std_inv)
+
+    def __call__(self, tensor):
+        return super().__call__(tensor.clone())
+
+
 normalize_img = torchvision.transforms.Compose((
     torchvision.transforms.ToTensor(),
     torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225]),
+))
+
+denormalize_img = torchvision.transforms.Compose((
+    NormalizeInverse(mean=[0.485, 0.456, 0.406],
+                     std=[0.229, 0.224, 0.225]),
+    torchvision.transforms.ToPILImage(),
 ))
 
 
@@ -65,6 +84,26 @@ def img_transform(img, post_rot, post_tran,
     return img, post_rot, post_tran
 
 
+def get_transformation_matrix(R, t, inv=False):
+    pose = np.eye(4, dtype=np.float32)
+    pose[:3, :3] = R if not inv else R.T
+    pose[:3, -1] = t if not inv else R.T @ -t
+
+    return pose
+
+
+def get_pose(rotation, translation, inv=False, flat=False):
+    if flat:
+        yaw = Quaternion(rotation).yaw_pitch_roll[0]
+        R = Quaternion(scalar=np.cos(yaw / 2), vector=[0, 0, np.sin(yaw / 2)]).rotation_matrix
+    else:
+        R = Quaternion(rotation).rotation_matrix
+
+    t = np.array(translation, dtype=np.float32)
+
+    return get_transformation_matrix(R, t, inv=inv)
+
+
 class NuscData(torch.utils.data.Dataset):
     def __init__(self,
                  nusc,
@@ -82,7 +121,12 @@ class NuscData(torch.utils.data.Dataset):
                  ybound=[-50.0, 50.0, 0.5],
                  zbound=[-10.0, 10.0, 20.0],
                  dbound=[4.0, 45.0, 1.0],
-        ):
+                 ood=False,
+                 flipped=True
+                 ):
+
+        self.ood = ood
+        self.flipped = flipped
 
         self.grid_conf = {
             'xbound': xbound,
@@ -105,6 +149,7 @@ class NuscData(torch.utils.data.Dataset):
         self.nusc = nusc
         self.nusc_maps = nusc_maps
         self.is_train = is_train
+        self.augment = is_train
         self.scenes = self.get_scenes()
         self.ixes = self.prepro()
 
@@ -172,16 +217,32 @@ class NuscData(torch.utils.data.Dataset):
         # remove samples that aren't in this split
         samples = [samp for samp in samples if
                    self.nusc.get('scene', samp['scene_token'])['name'] in self.scenes]
+        ood = []
+        id = []
+
+        for rec in samples:
+            c = False
+
+            for tok in rec['anns']:
+                inst = self.nusc.get('sample_annotation', tok)
+                if inst['category_name'].split('.')[0] == 'animal' or inst['category_name'].split('.')[1] == 'emergency':
+                    ood.append(rec)
+                    c = True
+                    break
+
+            if not c:
+                id.append(rec)
 
         # sort by scene, timestamp (only to make chronological viz easier)
-        samples.sort(key=lambda x: (x['scene_token'], x['timestamp']))
+        ood.sort(key=lambda x: (x['scene_token'], x['timestamp']))
+        id.sort(key=lambda x: (x['scene_token'], x['timestamp']))
 
-        return samples
+        return ood if self.ood else id
 
     def sample_augmentation(self):
         H, W = self.data_aug_conf['H'], self.data_aug_conf['W']
         fH, fW = self.data_aug_conf['final_dim']
-        if self.is_train:
+        if self.augment:
             resize = np.random.uniform(*self.data_aug_conf['resize_lim'])
             resize_dims = (int(W * resize), int(H * resize))
             newW, newH = resize_dims
@@ -203,24 +264,39 @@ class NuscData(torch.utils.data.Dataset):
             rotate = 0
         return resize, resize_dims, crop, flip, rotate
 
+    def parse_pose(self, record, *args, **kwargs):
+        return get_pose(record['rotation'], record['translation'], *args, **kwargs)
+
     def get_image_data(self, rec, cams):
         imgs = []
         rots = []
         trans = []
         intrins = []
+        extrins = []
         post_rots = []
         post_trans = []
+
+        lidar_record = self.nusc.get('sample_data', rec['data']['LIDAR_TOP'])
+        egolidar = self.nusc.get('ego_pose', lidar_record['ego_pose_token'])
+        world_from_egolidarflat = self.parse_pose(egolidar, flat=True)
 
         for cam in cams:
             samp = self.nusc.get('sample_data', rec['data'][cam])
             imgname = os.path.join(self.nusc.dataroot, samp['filename'])
             img = Image.open(imgname)
-            # img.save(cam+".jpg")
             post_rot = torch.eye(2)
             post_tran = torch.zeros(2)
 
             sens = self.nusc.get('calibrated_sensor', samp['calibrated_sensor_token'])
             intrin = torch.Tensor(sens['camera_intrinsic'])
+
+            egocam = self.nusc.get('ego_pose', samp['ego_pose_token'])
+
+            cam_from_egocam = self.parse_pose(sens, inv=True)
+            egocam_from_world = self.parse_pose(egocam, inv=True)
+
+            extrin = torch.tensor(cam_from_egocam @ egocam_from_world @ world_from_egolidarflat)
+
             rot = torch.Tensor(Quaternion(sens['rotation']).rotation_matrix)
             tran = torch.Tensor(sens['translation'])
 
@@ -240,15 +316,18 @@ class NuscData(torch.utils.data.Dataset):
             post_tran[:2] = post_tran2
             post_rot[:2, :2] = post_rot2
 
-            imgs.append(normalize_img(img))
+            # imgs.append(normalize_img(img))
+            imgs.append(torch.tensor(np.array(img)).permute(2, 0, 1) / 255)
+
             intrins.append(intrin)
+            extrins.append(extrin)
             rots.append(rot)
             trans.append(tran)
             post_rots.append(post_rot)
             post_trans.append(post_tran)
 
         return (torch.stack(imgs), torch.stack(rots), torch.stack(trans),
-                torch.stack(intrins), torch.stack(post_rots), torch.stack(post_trans))
+                torch.stack(intrins), torch.stack(extrins), torch.stack(post_rots), torch.stack(post_trans))
 
     def get_label(self, rec):
         egopose = self.nusc.get('ego_pose',
@@ -256,23 +335,40 @@ class NuscData(torch.utils.data.Dataset):
         trans = -np.array(egopose['translation'])
         rot = Quaternion(egopose['rotation']).inverse
         vehicles = np.zeros((self.nx[0], self.nx[1]))
+        ood = np.zeros((self.nx[0], self.nx[1]))
 
         for tok in rec['anns']:
             inst = self.nusc.get('sample_annotation', tok)
 
-            if inst['category_name'].split('.')[0] == 'vehicle':
-                box = Box(inst['translation'], inst['size'], Quaternion(inst['rotation']))
-                box.translate(trans)
-                box.rotate(rot)
+            if int(inst['visibility_token']) <= 2:
+                continue
 
-                pts = box.bottom_corners()[:2].T
-                pts = np.round(
-                    (pts - self.bx[:2] + self.dx[:2] / 2.) / self.dx[:2]
-                ).astype(np.int32)
-                pts[:, [1, 0]] = pts[:, [0, 1]]
-                cv2.fillPoly(vehicles, [pts], 1.0)
+            if self.ood:
+                if inst['category_name'].split('.')[0] == 'animal' or inst['category_name'].split('.')[1] == 'emergency':
+                    box = Box(inst['translation'], inst['size'], Quaternion(inst['rotation']))
+                    box.translate(trans)
+                    box.rotate(rot)
 
-        full_frame(200*0.01, 200*0.01)
+                    pts = box.bottom_corners()[:2].T
+                    pts = np.round(
+                        (pts - self.bx[:2] + self.dx[:2] / 2.) / self.dx[:2]
+                    ).astype(np.int32)
+                    pts[:, [1, 0]] = pts[:, [0, 1]]
+                    cv2.fillPoly(ood, [pts], 1.0)
+            else:
+                if inst['category_name'].split('.')[0] == 'vehicle':
+                    box = Box(inst['translation'], inst['size'], Quaternion(inst['rotation']))
+                    box.translate(trans)
+                    box.rotate(rot)
+
+                    pts = box.bottom_corners()[:2].T
+                    pts = np.round(
+                        (pts - self.bx[:2] + self.dx[:2] / 2.) / self.dx[:2]
+                    ).astype(np.int32)
+                    pts[:, [1, 0]] = pts[:, [0, 1]]
+                    cv2.fillPoly(vehicles, [pts], 1.0)
+
+        full_frame(200 * 0.01, 200 * 0.01)
         plot_nusc_map(rec, self.nusc_maps, self.nusc, self.scene2map, self.dx[:2], self.bx[:2])
 
         plt.xlim((200, 0))
@@ -288,23 +384,28 @@ class NuscData(torch.utils.data.Dataset):
         road = mask(map, (0, 255, 0))
         lane = mask(map, (0, 0, 255))
 
-        road = cv2.flip(road, 0)
-        road = cv2.flip(road, 1)
-        lane = cv2.flip(lane, 0)
-        lane = cv2.flip(lane, 1)
+        if self.flipped:
+            road = cv2.flip(road, 0)
+            road = cv2.flip(road, 1)
+            lane = cv2.flip(lane, 0)
+            lane = cv2.flip(lane, 1)
+        else:
+            vehicles = cv2.flip(vehicles, 0)
+            vehicles = cv2.flip(vehicles, 1)
 
-        empty = torch.ones((200, 200))
+        # empty = torch.ones((200, 200))
 
-        empty[vehicles == 1] = 0
-        empty[road == 1] = 0
-        empty[lane == 1] = 0
+        # empty[vehicles == 1] = 0
+        # empty[road == 1] = 0
+        # empty[lane == 1] = 0
 
-        label = np.stack((vehicles, road, lane, empty))
+        # label = np.stack((vehicles, road, lane, empty))
+        label = np.stack((vehicles, empty))
 
-        return torch.tensor(label)
+        return torch.tensor(ood) if self.ood else torch.tensor(label).float()
 
     def choose_cams(self):
-        if self.is_train and self.data_aug_conf['Ncams'] < len(self.data_aug_conf['cams']):
+        if self.augment and self.data_aug_conf['Ncams'] < len(self.data_aug_conf['cams']):
             cams = np.random.choice(self.data_aug_conf['cams'], self.data_aug_conf['Ncams'],
                                     replace=False)
         else:
@@ -322,10 +423,10 @@ class NuscData(torch.utils.data.Dataset):
         rec = self.ixes[index]
 
         cams = self.choose_cams()
-        imgs, rots, trans, intrins, post_rots, post_trans = self.get_image_data(rec, cams)
+        imgs, rots, trans, intrins, extrins, post_rots, post_trans = self.get_image_data(rec, cams)
         label = self.get_label(rec)
 
-        return imgs, rots, trans, intrins, post_rots, post_trans, label
+        return imgs, rots, trans, intrins, extrins, post_rots, post_trans, label
 
 
 def worker_rnd_init(x):
@@ -342,12 +443,13 @@ def get_nusc_maps(map_folder):
                  ]}
     return nusc_maps
 
+
 def full_frame(width=None, height=None):
     import matplotlib as mpl
     mpl.rcParams['savefig.pad_inches'] = 0
     figsize = None if width is None else (width, height)
     fig = plt.figure(figsize=figsize)
-    ax = plt.axes([0,0,1,1], frameon=False)
+    ax = plt.axes([0, 0, 1, 1], frameon=False)
     ax.get_xaxis().set_visible(False)
     ax.get_yaxis().set_visible(False)
     plt.autoscale(tight=True)
@@ -431,23 +533,29 @@ def get_local_map(nmap, center, stretch, layer_names, line_names):
 
 
 def compile_data(version, dataroot, batch_size,
-                 num_workers):
+                 num_workers, ood=False, augment_train=True, shuffle_train=True, flipped=True):
     nusc = NuScenes(version='v1.0-{}'.format(version),
                     dataroot=os.path.join(dataroot, version),
                     verbose=False)
+    print(f"Flipped: {flipped}")
     print(os.path.join(dataroot, version))
     nusc_maps = get_nusc_maps(os.path.join(dataroot, version))
 
-    train_data = NuscData(nusc, nusc_maps, is_train=True)
-    val_data = NuscData(nusc, nusc_maps, is_train=False)
+    train_data = NuscData(nusc, nusc_maps, is_train=True, flipped=flipped)
+    val_data = NuscData(nusc, nusc_maps, is_train=False, ood=ood, flipped=flipped)
+
+    if not augment_train:
+        train_data.augment = False
 
     train_loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size,
-                                               shuffle=True,
+                                               shuffle=shuffle_train,
                                                num_workers=num_workers,
                                                drop_last=True,
                                                worker_init_fn=worker_rnd_init)
-    val_loader = torch.utils.data.DataLoader(val_data, batch_size=batch_size,
-                                             shuffle=True,
-                                             num_workers=num_workers)
+    val_loader = torch.utils.data.DataLoader(val_data,
+                                             batch_size=batch_size,
+                                             shuffle=False,
+                                             num_workers=num_workers,
+                                             drop_last=True, )
 
     return train_loader, val_loader

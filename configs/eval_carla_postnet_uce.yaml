@@ -1,8 +1,0 @@
-type: 'postnet_uce'
-logdir: 'carla/postnet_uce'
-gpus: [0,1]
-dataset: 'carla'
-batch_size: 32
-num_workers: 64
-model_path: './carla/postnet_uce/best.pt'
-tsne: false

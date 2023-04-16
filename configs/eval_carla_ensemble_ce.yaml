@@ -1,8 +1,0 @@
-type: 'ensemble_ce'
-logdir: 'carla/ensemble_ce'
-gpus: [0,5,6,7]
-dataset: 'carla'
-batch_size: 16
-num_workers: 64
-model_path: './carla/ensemble_ce/best.pt'
-tsne: false

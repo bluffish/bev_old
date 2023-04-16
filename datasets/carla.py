@@ -75,7 +75,9 @@ class CarlaDataset(torch.utils.data.Dataset):
             rot_lim=(-5.4, 5.4),
             rand_flip=True,
             is_train=False,
+            ood = False
     ):
+        self.ood = ood
 
         self.data_path = data_path
         self.type = type
@@ -121,18 +123,22 @@ class CarlaDataset(torch.utils.data.Dataset):
         label = np.array(label_r)
         label_r.close()
 
+        empty = np.ones((200, 200))
+
         road = mask(label, (128, 64, 128))
         lane = mask(label, (157, 234, 50))
         vehicles = mask(label, (0, 0, 142))
-        empty = np.ones((200, 200))
+        ood = torch.tensor(mask(label, (0,0,0)))
 
         empty[vehicles == 1] = 0
         empty[road == 1] = 0
         empty[lane == 1] = 0
-
         label = np.stack((vehicles, road, lane, empty))
 
-        label = torch.tensor(label)
+        if self.ood:
+            label = ood
+        else:
+            label = torch.tensor(label)
 
         for sensor_name, sensor_info in self.sensors_info['sensors'].items():
             if sensor_info["sensor_type"] == "sensor.camera.rgb" and sensor_name != "birds_view_camera":
@@ -237,9 +243,13 @@ class CarlaDataset(torch.utils.data.Dataset):
         return resize, resize_dims, crop, flip, rotate
 
 
-def compile_data(version, dataroot, batch_size, num_workers):
+def compile_data(version, dataroot, batch_size, num_workers, ood=False):
     train_dataset = CarlaDataset(os.path.join(dataroot, "train/"))
-    val_dataset = CarlaDataset(os.path.join(dataroot, "val/"))
+
+    if ood:
+        val_dataset = CarlaDataset(os.path.join(dataroot, "val_ood/"), ood=ood)
+    else:
+        val_dataset = CarlaDataset(os.path.join(dataroot, "val/"), ood=ood)
 
     if version == "mini":
         train_dataset.length = 128
@@ -253,7 +263,7 @@ def compile_data(version, dataroot, batch_size, num_workers):
 
     val_loader = torch.utils.data.DataLoader(val_dataset,
                                              batch_size=batch_size,
-                                             shuffle=True,
+                                             shuffle=False,
                                              num_workers=num_workers,
                                              drop_last=True)
 

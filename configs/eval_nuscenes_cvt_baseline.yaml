@@ -1,0 +1,10 @@
+type: 'baseline'
+backbone: 'cvt'
+dataset: 'nuscenes'
+logdir: 'nuscenes/cvt_baseline'
+gpus: [0]
+batch_size: 1
+num_workers: 1
+model_path: 'nuscenes/cvt_baseline_binary_flipped/best_iou.pt'
+tsne: false
+

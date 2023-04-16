@@ -1,1 +1,0 @@
-Using config ./configs/train_postnet_ce.yaml
