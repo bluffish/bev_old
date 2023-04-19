@@ -1,0 +1,10 @@
+type: 'baseline'
+backbone: 'lss'
+dataset: 'nuscenes'
+logdir: 'nuscenes/lss_enn'
+gpus: [0]
+batch_size: 8
+num_workers: 16
+model_path: 'nuscenes/lss_enn/best_auroc.pt'
+tsne: false
+

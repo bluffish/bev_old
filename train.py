@@ -26,6 +26,10 @@ def get_val(model, val_loader, device, loss_fn, activation, num_classes):
     y_score_m = []
     c = 0
 
+    if config['type'] == 'dropout':
+        model.module.tests = 20
+        model.module.train()
+
     with torch.no_grad():
         for (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels) in tqdm(val_loader):
             preds = model(imgs, rots, trans, intrins, extrins, post_rots, post_trans)
@@ -66,19 +70,25 @@ def get_val(model, val_loader, device, loss_fn, activation, num_classes):
 
     iou = [i / len(val_loader.dataset) for i in iou]
 
-    auroc = roc_auc_score(y_true_m, y_score_m)
-    aupr = average_precision_score(y_true_m, y_score_m)
+    try:
+        auroc = roc_auc_score(y_true_m, y_score_m)
+        aupr = average_precision_score(y_true_m, y_score_m)
+    except:
+        auroc = 0
+        aupr = 0
+
+    if config['type'] == 'dropout':
+        model.module.tests = -1
 
     return total_loss / len(val_loader.dataset), iou, auroc, aupr
 
 
 def train():
     device = torch.device('cpu') if len(config['gpus']) < 0 else torch.device(f'cuda:{config["gpus"][0]}')
-    num_classes, classes = 4, ["vehicle", "road", "lane", "background"]
+    num_classes, classes = 1, ["vehicle", "road", "lane", "background"]
 
     compile_data = compile_data_carla if config['dataset'] == 'carla' else compile_data_nuscenes
-    train_loader, val_loader = compile_data("trainval", f"../data/{config['dataset']}",
-                                            config["batch_size"], config['num_workers'], augment_train=False, flipped=(config['backbone'] == 'lss'))
+    train_loader, val_loader = compile_data("trainval", config, shuffle_train=True)
 
     class_proportions = {
         "nuscenes": [0.0206, 0.173, 0.0294, 0.777],
@@ -99,7 +109,16 @@ def train():
         print(f"Loading pretrained weights from {config['pretrained']}")
         model.load_state_dict(torch.load(config["pretrained"]))
 
-    opt = torch.optim.Adam(model.parameters(), lr=config['learning_rate'], weight_decay=config['weight_decay'])
+    if config['backbone'] == 'lss':
+        opt = torch.optim.Adam(model.parameters(), lr=config['learning_rate'], weight_decay=config['weight_decay'])
+        scheduler = None
+        print("Using Adam")
+    else:
+        opt = torch.optim.AdamW(model.parameters(), lr=config['learning_rate'], weight_decay=config['weight_decay'])
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, div_factor=10, pct_start=.3, final_div_factor=10,
+                                                        max_lr=config['learning_rate'], total_steps=config['num_steps'],
+                                                        cycle_momentum=False)
+        print("Using AdamW")
 
     os.makedirs(config['logdir'], exist_ok=True)
 
@@ -120,9 +139,10 @@ def train():
     best_auroc = 0.0
     best_aupr = 0.0
 
-    counter = 0
+    step = 0
+    epoch = 0
 
-    for epoch in range(config['num_epochs']):
+    while True:
         for batchi, (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels) in enumerate(
                 train_loader):
             t0 = time()
@@ -135,34 +155,41 @@ def train():
             loss.backward(retain_graph=True)
             nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             opt.step()
-            counter += 1
+
+            step += 1
             t1 = time()
 
-            if counter % 10 == 0:
-                print(counter, loss.item())
-                writer.add_scalar('train/loss', loss, counter)
+            if scheduler is not None:
+                scheduler.step()
+
+            cv2.imwrite(os.path.join(config['logdir'], "binary_preds.jpg"), preds[0, 0].detach().cpu().numpy() * 255)
+            cv2.imwrite(os.path.join(config['logdir'], "binary_labels.jpg"), labels[0, 0].detach().cpu().numpy() * 255)
+
+            if step % 10 == 0:
+                print(step, loss.item())
+                writer.add_scalar('train/loss', loss, step)
                 save_pred(preds, labels, config['logdir'])
 
-            if counter % 50 == 0:
+            if step % 50 == 0:
                 intersection, union = get_iou(preds, labels)
                 iou = [intersection[i] / union[i] for i in range(0, num_classes)]
 
-                print(counter, "iou: ", iou)
+                print(step, "iou: ", iou)
 
                 for i in range(0, num_classes):
-                    writer.add_scalar(f'train/{classes[i]}_iou', iou[i], counter)
+                    writer.add_scalar(f'train/{classes[i]}_iou', iou[i], step)
 
-                writer.add_scalar('train/epoch', epoch, counter)
-                writer.add_scalar('train/step_time', t1 - t0, counter)
+                writer.add_scalar('train/epoch', epoch, step)
+                writer.add_scalar('train/step_time', t1 - t0, step)
 
-            if counter % config['val_step'] == 0:
+            if step % config['val_step'] == 0:
 
                 model.eval()
                 print("Running EVAL...")
                 val_loss, val_iou, auroc, aupr = get_val(model, val_loader, device, loss_fn, activation, num_classes)
                 print(f"VAL loss: {val_loss}, iou: {val_iou}, auroc {auroc}, aupr {aupr}")
 
-                save_path = os.path.join(config['logdir'], f"model{counter}.pt")
+                save_path = os.path.join(config['logdir'], f"model{step}.pt")
                 print(f"Saving Model: {save_path}")
                 torch.save(model.state_dict(), save_path)
 
@@ -181,12 +208,17 @@ def train():
 
                 model.train()
 
-                writer.add_scalar('val/loss', val_loss, counter)
-                writer.add_scalar('val/auroc', auroc, counter)
-                writer.add_scalar('val/aupr', aupr, counter)
+                writer.add_scalar('val/loss', val_loss, step)
+                writer.add_scalar('val/auroc', auroc, step)
+                writer.add_scalar('val/aupr', aupr, step)
 
                 for i in range(0, num_classes):
-                    writer.add_scalar(f'val/{classes[i]}_iou', val_iou[i], counter)
+                    writer.add_scalar(f'val/{classes[i]}_iou', val_iou[i], step)
+
+            if step == config['num_steps'] == 0:
+                return
+
+        epoch += 1
 
 
 if __name__ == "__main__":

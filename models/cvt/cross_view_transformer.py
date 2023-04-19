@@ -26,7 +26,6 @@ class CrossViewTransformer(nn.Module):
             nn.Conv2d(dim_last, outC, 1))
 
     def forward(self, imgs, rots, trans, intrins, extrins, post_rots, post_trans):
-
         batch = {
             'image': imgs,
             'intrinsics': self.convert(intrins),
@@ -39,11 +38,11 @@ class CrossViewTransformer(nn.Module):
         return z
 
     def convert(self, intrins):
-        intrins[:, :, 0, 0] *= 352/1600
-        intrins[:, :, 0, 2] *= 352/1600
-        intrins[:, :, 1, 1] *= 174/900
-        intrins[:, :, 1, 2] *= 174/900
-        intrins[:, :, 1, 2] -= 46
+        intrins[:, :, 0, 0] *= W/1600
+        intrins[:, :, 0, 2] *= W/1600
+        intrins[:, :, 1, 1] *= (H+O)/900
+        intrins[:, :, 1, 2] *= (H+O)/900
+        intrins[:, :, 1, 2] -= O
         return intrins
 
 
@@ -63,6 +62,8 @@ class CrossViewTransformerDropout(CrossViewTransformer):
             nn.Conv2d(dim_last, outC, 1)
         )
 
+        self.tests = -1
+
         self.decoder.dropout = True
 
     def forward(self, x, rots, trans, intrins, extrins, post_rots, post_trans):
@@ -74,7 +75,7 @@ class CrossViewTransformerDropout(CrossViewTransformer):
 
             return torch.mean(torch.stack(outputs), dim=0)
         else:
-            return super().forward(x, rots, trans, intrins, post_rots, post_trans)
+            return super().forward(x, rots, trans, intrins, extrins, post_rots, post_trans)
 
 
 class CrossViewTransformerEnsemble(CrossViewTransformer):
@@ -92,7 +93,7 @@ class CrossViewTransformerEnsemble(CrossViewTransformer):
         outputs = []
 
         for model in self.models:
-            outputs.append(model(x, rots, trans, intrins, post_rots, post_trans))
+            outputs.append(model(x, rots, trans, intrins, extrins, post_rots, post_trans))
 
         return torch.mean(torch.stack(outputs), dim=0)
 

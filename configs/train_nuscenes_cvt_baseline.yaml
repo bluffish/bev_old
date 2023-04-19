@@ -1,11 +1,12 @@
 type: 'baseline'
 backbone: 'cvt'
 dataset: 'nuscenes'
-logdir: 'nuscenes/cvt_baseline'
+logdir: 'nuscenes/cvt_baseline_binary_focal_scheduler_adamw'
 gpus: [0]
 batch_size: 16
 num_workers: 16
 weight_decay: 0.0000001
 learning_rate: 0.004
-num_epochs: 100
+num_epochs: 20
+num_steps: 30000
 val_step: 1000

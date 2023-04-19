@@ -11,6 +11,10 @@ from models.cvt.efficientnet import EfficientNetExtractor
 ResNetBottleNeck = lambda c: Bottleneck(c, c // 4)
 import cv2
 
+H = 224
+W = 480
+O = 46
+
 def inverse(x):
     return torch.tensor(np.linalg.inv(x.cpu().numpy())).to(x.device)
 
@@ -159,22 +163,22 @@ class CrossAttention(nn.Module):
 
         # Dot product attention along cameras
         dot = self.scale * torch.einsum('b n Q d, b n K d -> b n Q K', q, k)
-        att = dot.softmax(dim=-1).sum(dim=0)
-
-        try:
-            camera_att_maps = att.view(6, 25, 25, 32, 88)
-            carx, cary = 19, 24
-            carw, carh = 1, 1
-            carxs = slice(carx, carx + carw)
-            carys = slice(cary, cary + carh)
-            for i in range(camera_att_maps.size(0)):
-                att_map = camera_att_maps[i].detach().cpu().numpy()
-                car_att = att_map[carxs, carys, :, :].sum(axis=(0, 1))
-                car_att = cv2.applyColorMap(np.array(255 * car_att).astype(np.uint8), cv2.COLORMAP_JET)
-                print(car_att.shape)
-                cv2.imwrite(f"./cam{i + 1}.png", car_att)
-        except:
-            pass
+        # try:
+        #     att = dot.softmax(dim=-1).sum(dim=0)
+        #     camera_att_maps = att.view(6, 25, 25, 32, 88)
+        #     print(camera_att_maps)
+        #     carx, cary = 19, 24
+        #     carw, carh = 1, 1
+        #     carxs = slice(carx, carx + carw)
+        #     carys = slice(cary, cary + carh)
+        #     for i in range(camera_att_maps.size(0)):
+        #         att_map = camera_att_maps[i].detach().cpu().numpy()
+        #         car_att = att_map[carxs, carys, :, :].sum(axis=(0, 1))
+        #         car_att = cv2.applyColorMap(np.array(255 * car_att).astype(np.uint8), cv2.COLORMAP_JET)
+        #         print(car_att.shape)
+        #         cv2.imwrite(f"./cam{i + 1}.png", car_att)
+        # except:
+        #     pass
 
         dot = rearrange(dot, 'b n Q K -> b Q (n K)')
         att = dot.softmax(dim=-1)
@@ -312,8 +316,8 @@ class Encoder(nn.Module):
         self.norm = Normalize()
         self.backbone = EfficientNetExtractor(model_name="efficientnet-b4",
                                               layer_names=['reduction_2', 'reduction_4'],
-                                              image_height=128,
-                                              image_width=352)
+                                              image_height=H,
+                                              image_width=W)
 
         cross_view = {
             "heads": 4,
@@ -322,8 +326,8 @@ class Encoder(nn.Module):
             "skip": True,
             "no_image_features": False,
 
-            "image_height": 128,
-            "image_width": 352
+            "image_height": H,
+            "image_width": W
         }
 
         bev_embedding = {

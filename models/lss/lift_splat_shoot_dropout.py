@@ -32,7 +32,7 @@ class LiftSplatShootDropout(LiftSplatShoot):
             outputs = []
 
             for i in range(self.tests):
-                outputs.append(super().forward(x, rots, trans, intrins, post_rots, post_trans))
+                outputs.append(super().forward(x, rots, trans, intrins, extrins, post_rots, post_trans))
 
             return torch.mean(torch.stack(outputs), dim=0)
         else:

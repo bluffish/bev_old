@@ -113,13 +113,14 @@ def get_iou(preds, labels):
 
     with torch.no_grad():
         for i in range(classes):
-            pred = (pmax == i)
+            pred = (preds[:,i,:,: ] > .5)
+            # pred = (pmax == i)
+
             tgt = labels[:, i, :, :].bool()
             intersect[i] = (pred & tgt).sum().float().item()
             union[i] = (pred | tgt).sum().float().item()
 
     return intersect, union
-
 
 def get_step(preds, labels, activation, loss_fn, type):
     if type == 'postnet' or type == 'enn':
@@ -127,7 +128,8 @@ def get_step(preds, labels, activation, loss_fn, type):
         loss = loss_fn(preds, labels)
     elif type == 'baseline' or type == 'dropout' or type == 'ensemble':
         loss = loss_fn(preds, labels)
-        preds = activation(preds, dim=1)
+        preds = preds.sigmoid()
+        # preds = activation(preds, dim=1)
 
     return preds, loss
 
@@ -142,8 +144,8 @@ def get_model(type, backbone, num_classes, device):
     if type == 'baseline':
         activation = torch.softmax
         # loss_fn = torch.nn.CrossEntropyLoss().cuda(device)
-        loss_fn = torch.nn.CrossEntropyLoss(weight=torch.tensor([3.0, 1.0, 3.0, 1.0])).cuda(device)
-        # loss_fn = SigmoidFocalLoss().cuda(device)
+        # loss_fn = torch.nn.CrossEntropyLoss(weight=torch.tensor([3.0, 1.0, 3.0, 1.0])).cuda(device)
+        loss_fn = SigmoidFocalLoss().cuda(device)
         # loss_fn = torch.nn.BCEWithLogitsLoss().cuda(device)
         model = backbones[backbone][0](outC=num_classes)
     elif type == 'enn':

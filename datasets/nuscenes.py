@@ -108,15 +108,14 @@ class NuscData(torch.utils.data.Dataset):
     def __init__(self,
                  nusc,
                  nusc_maps,
+                 final_dim,
                  is_train=False,
                  H=900, W=1600,
                  resize_lim=(0.193, 0.225),
-                 final_dim=(128, 352),
                  bot_pct_lim=(0.0, 0.22),
                  rot_lim=(-5.4, 5.4),
                  rand_flip=True,
                  ncams=5,
-
                  xbound=[-50.0, 50.0, 0.5],
                  ybound=[-50.0, 50.0, 0.5],
                  zbound=[-10.0, 10.0, 20.0],
@@ -124,7 +123,6 @@ class NuscData(torch.utils.data.Dataset):
                  ood=False,
                  flipped=True
                  ):
-
         self.ood = ood
         self.flipped = flipped
 
@@ -212,6 +210,7 @@ class NuscData(torch.utils.data.Dataset):
         return scenes
 
     def prepro(self):
+
         samples = [samp for samp in self.nusc.sample]
 
         # remove samples that aren't in this split
@@ -225,17 +224,18 @@ class NuscData(torch.utils.data.Dataset):
 
             for tok in rec['anns']:
                 inst = self.nusc.get('sample_annotation', tok)
-                if inst['category_name'].split('.')[0] == 'animal' or inst['category_name'].split('.')[1] == 'emergency':
+                # if inst['category_name'].split('.')[0] == 'animal' or inst['category_name'].split('.')[1] == 'bicycle' or inst['category_name'].split('.')[1] == 'motorcycle':
+                if inst['category_name'].split('.')[0] == 'animal':
                     ood.append(rec)
                     c = True
                     break
 
-            if not c:
-                id.append(rec)
+            # if not c:
+            id.append(rec)
 
         # sort by scene, timestamp (only to make chronological viz easier)
-        ood.sort(key=lambda x: (x['scene_token'], x['timestamp']))
-        id.sort(key=lambda x: (x['scene_token'], x['timestamp']))
+        # ood.sort(key=lambda x: (x['scene_token'], x['timestamp']))
+        # id.sort(key=lambda x: (x['scene_token'], x['timestamp']))
 
         return ood if self.ood else id
 
@@ -256,8 +256,12 @@ class NuscData(torch.utils.data.Dataset):
         else:
             resize = max(fH / H, fW / W)
             resize_dims = (int(W * resize), int(H * resize))
+            # print(resize_dims)
             newW, newH = resize_dims
-            crop_h = int((1 - np.mean(self.data_aug_conf['bot_pct_lim'])) * newH) - fH
+            # crop_h = int((1 - np.mean(self.data_aug_conf['bot_pct_lim'])) * newH) - fH
+
+            crop_h = int(max(0, newH - fH))
+            # print(crop_h)
             crop_w = int(max(0, newW - fW) / 2)
             crop = (crop_w, crop_h, crop_w + fW, crop_h + fH)
             flip = False
@@ -316,9 +320,7 @@ class NuscData(torch.utils.data.Dataset):
             post_tran[:2] = post_tran2
             post_rot[:2, :2] = post_rot2
 
-            # imgs.append(normalize_img(img))
             imgs.append(torch.tensor(np.array(img)).permute(2, 0, 1) / 255)
-
             intrins.append(intrin)
             extrins.append(extrin)
             rots.append(rot)
@@ -344,7 +346,9 @@ class NuscData(torch.utils.data.Dataset):
                 continue
 
             if self.ood:
-                if inst['category_name'].split('.')[0] == 'animal' or inst['category_name'].split('.')[1] == 'emergency':
+                if inst['category_name'].split('.')[0] == 'animal':
+                # if inst['category_name'].split('.')[0] == 'animal' or inst['category_name'].split('.')[1] == 'bicycle' or inst['category_name'].split('.')[1] == 'motorcycle':
+
                     box = Box(inst['translation'], inst['size'], Quaternion(inst['rotation']))
                     box.translate(trans)
                     box.rotate(rot)
@@ -400,7 +404,8 @@ class NuscData(torch.utils.data.Dataset):
         # empty[lane == 1] = 0
 
         # label = np.stack((vehicles, road, lane, empty))
-        label = np.stack((vehicles, empty))
+        # label = np.stack((vehicles, empty))
+        label = vehicles[None]
 
         return torch.tensor(ood) if self.ood else torch.tensor(label).float()
 
@@ -425,6 +430,8 @@ class NuscData(torch.utils.data.Dataset):
         cams = self.choose_cams()
         imgs, rots, trans, intrins, extrins, post_rots, post_trans = self.get_image_data(rec, cams)
         label = self.get_label(rec)
+
+        # cv2.imwrite(f"binary_labels{index}.jpg", label[0].detach().cpu().numpy() * 255)
 
         return imgs, rots, trans, intrins, extrins, post_rots, post_trans, label
 
@@ -532,30 +539,33 @@ def get_local_map(nmap, center, stretch, layer_names, line_names):
     return polys
 
 
-def compile_data(version, dataroot, batch_size,
-                 num_workers, ood=False, augment_train=True, shuffle_train=True, flipped=True):
+def compile_data(version, config, ood=False, augment_train=False, shuffle_train=True):
+    dataroot = os.path.join("../data", config['dataset'])
     nusc = NuScenes(version='v1.0-{}'.format(version),
                     dataroot=os.path.join(dataroot, version),
                     verbose=False)
+    flipped = config['backbone'] == 'lss'
+    dims = (128, 352) if config['backbone'] == 'lss' else (224, 480)
     print(f"Flipped: {flipped}")
+    print(f"Dims: {dims}")
     print(os.path.join(dataroot, version))
     nusc_maps = get_nusc_maps(os.path.join(dataroot, version))
 
-    train_data = NuscData(nusc, nusc_maps, is_train=True, flipped=flipped)
-    val_data = NuscData(nusc, nusc_maps, is_train=False, ood=ood, flipped=flipped)
+    train_data = NuscData(nusc, nusc_maps, dims, is_train=True, flipped=flipped)
+    val_data = NuscData(nusc, nusc_maps, dims, is_train=False, ood=ood, flipped=flipped)
 
     if not augment_train:
         train_data.augment = False
 
-    train_loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size,
+    train_loader = torch.utils.data.DataLoader(train_data, batch_size=config['batch_size'],
                                                shuffle=shuffle_train,
-                                               num_workers=num_workers,
+                                               num_workers=config['num_workers'],
                                                drop_last=True,
                                                worker_init_fn=worker_rnd_init)
     val_loader = torch.utils.data.DataLoader(val_data,
-                                             batch_size=batch_size,
+                                             batch_size=config['batch_size'],
                                              shuffle=False,
-                                             num_workers=num_workers,
-                                             drop_last=True, )
+                                             num_workers=config['num_workers'],
+                                             drop_last=True)
 
     return train_loader, val_loader

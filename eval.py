@@ -23,13 +23,12 @@ sns.set_context("notebook", font_scale=1.5,
 
 
 def eval(config):
-    ood = False
     compile_data = compile_data_carla if config['dataset'] == 'carla' else compile_data_nuscenes
     train_loader, val_loader = compile_data("trainval" if ood else "mini", f"../data/{config['dataset']}", config["batch_size"],
                                             config['num_workers'], ood=ood, flipped=(config['backbone']=='lss'), augment_train=False)
 
     device = torch.device('cpu') if len(config['gpus']) < 0 else torch.device(f'cuda:{config["gpus"][0]}')
-    num_classes, classes = 2, ["vehicle", "road", "lane", "background"]
+    num_classes, classes = 4, ["vehicle", "road", "lane", "background"]
 
     class_proportions = {
         "nuscenes": [0.0206, 0.173, 0.0294, 0.777],
@@ -104,63 +103,49 @@ def eval(config):
 
     with torch.no_grad():
         for (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels) in tqdm(val_loader):
-            cv2.imwrite(f"label.jpg", labels[0, 0].cpu().numpy() * 255)
-            cv2.imwrite(f"cam_front.jpg", imgs[0,1].permute(1, 2, 0).cpu().numpy()*255)
-            cv2.imwrite(f"cam_back.jpg", imgs[0,4].permute(1, 2, 0).cpu().numpy()*255)
-            extrins = -extrins
 
             preds = model(imgs, rots, trans, intrins, extrins, post_rots, post_trans)
-            # uncertainty = uncertainty_function(preds)
-            pv = preds[0, 0].detach().cpu().numpy()
-            cv2.imwrite("preds.jpg", pv * 255)
-
-            for r in range(200):
-                for c in range(200):
-                    if pv[r][c] > .8:
-                        print(r, c)
-
+            uncertainty = uncertainty_function(preds)
 
             labels = labels.to(device)
             plt.clf()
 
-            if not ood:
-                # preds, loss = get_step(preds, labels, activation, loss_fn, config['type'])
-                preds = preds.sigmoid()
+            if ood:
+                cv2.imwrite(os.path.join(config['logdir'], "ood.jpg"),
+                           labels[0].cpu().numpy()*255)
+                # mask = np.logical_or(uncertainty[:, 0, :, :] > .5, labels.cpu() == 1).bool()
+                l = labels.ravel()
+                u = torch.tensor(uncertainty[:, 0, :, :]).ravel()
+
+                y_true += l.cpu()
+                y_score += u.cpu()
+            else:
+                preds, loss = get_step(preds, labels, activation, loss_fn, config['type'])
                 intersect, union = get_iou(preds, labels)
-                print(intersect[0]/union[0])
                 draw(preds, imgs, rots, trans, intrins, post_rots, post_trans, labels)
-                cv2.imwrite("preds.jpg", preds[0,0].detach().cpu().numpy() * 255)
 
-            break
+                for j in range(0, num_classes):
+                    iou[j] += 1 if union[0] == 0 else intersect[j] / union[j] * preds.shape[0]
 
-        # if ood:
-        #     l = labels.ravel()
-        #     u = torch.tensor(uncertainty[:, 0, :, :]).ravel()
-        #
-        #     y_true += l.cpu()
-        #     y_score += u.cpu()
-        # else:
-        #     for j in range(0, num_classes):
-        #         iou[j] += 1 if union[0] == 0 else intersect[j] / union[j] * preds.shape[0]
-        #
-        #     save_pred(preds, labels, config['logdir'])
-        #     plt.imsave(os.path.join(config['logdir'], "uncertainty_map.jpg"),
-        #                plt.cm.jet(uncertainty[0][0]))
-        #
-        #     pmax = torch.argmax(preds, dim=1).cpu()
-        #     lmax = torch.argmax(labels, dim=1).cpu()
-        #
-        #     for j in range(num_classes):
-        #         mask = np.logical_or(pmax == j, lmax == j).bool()
-        #
-        #         p = pmax[mask].ravel()
-        #         l = lmax[mask].ravel()
-        #         u = torch.tensor(uncertainty[:, 0, :, :][mask]).ravel()
-        #
-        #         intersect = p != l
-        #
-        #         y_true[j] += intersect
-        #         y_score[j] += u
+                save_pred(preds, labels, config['logdir'])
+                plt.imsave(os.path.join(config['logdir'], "uncertainty_map.jpg"),
+                           plt.cm.jet(uncertainty[0][0]))
+
+                pmax = torch.argmax(preds, dim=1).cpu()
+                lmax = torch.argmax(labels, dim=1).cpu()
+
+                for j in range(num_classes):
+                    mask = np.logical_or(pmax == j, lmax == j).bool()
+
+                    p = pmax[mask].ravel()
+                    l = lmax[mask].ravel()
+                    u = torch.tensor(uncertainty[:, 0, :, :][mask]).ravel()
+
+                    intersect = p != l
+
+                    y_true[j] += intersect
+                    y_score[j] += u
+
 
     if ood:
         pr, rec, _ = precision_recall_curve(y_true, y_score)
@@ -217,8 +202,7 @@ def eval(config):
                   f"{classes[j]} CLASS - AUPR: {aupr} AUROC: {auroc}")
             plt.savefig(save_path)
 
-            return pr, rec, fpr, tpr, aupr, auroc, iou[j]
-
+            # return pr, rec, fpr, tpr, aupr, auroc, iou[j]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
