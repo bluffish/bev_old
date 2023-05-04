@@ -1,11 +1,12 @@
 type: 'enn'
 backbone: 'lss'
 dataset: 'nuscenes'
-logdir: 'nuscenes/lss_enn_single'
+logdir: 'nuscenes/lss_enn_mini'
 gpus: [4]
-batch_size: 16
+batch_size: 32
 num_workers: 16
 weight_decay: 0.0000001
 learning_rate: 0.001
 num_epochs: 100
 val_step: 1000
+num_steps: 20000

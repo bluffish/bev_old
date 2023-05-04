@@ -163,23 +163,6 @@ class CrossAttention(nn.Module):
 
         # Dot product attention along cameras
         dot = self.scale * torch.einsum('b n Q d, b n K d -> b n Q K', q, k)
-        # try:
-        #     att = dot.softmax(dim=-1).sum(dim=0)
-        #     camera_att_maps = att.view(6, 25, 25, 32, 88)
-        #     print(camera_att_maps)
-        #     carx, cary = 19, 24
-        #     carw, carh = 1, 1
-        #     carxs = slice(carx, carx + carw)
-        #     carys = slice(cary, cary + carh)
-        #     for i in range(camera_att_maps.size(0)):
-        #         att_map = camera_att_maps[i].detach().cpu().numpy()
-        #         car_att = att_map[carxs, carys, :, :].sum(axis=(0, 1))
-        #         car_att = cv2.applyColorMap(np.array(255 * car_att).astype(np.uint8), cv2.COLORMAP_JET)
-        #         print(car_att.shape)
-        #         cv2.imwrite(f"./cam{i + 1}.png", car_att)
-        # except:
-        #     pass
-
         dot = rearrange(dot, 'b n Q K -> b Q (n K)')
         att = dot.softmax(dim=-1)
 
@@ -199,7 +182,7 @@ class CrossAttention(nn.Module):
         z = self.postnorm(z)
         z = rearrange(z, 'b (H W) d -> b d H W', H=H, W=W)
 
-        return z
+        return z, att
 
 
 class CrossViewAttention(nn.Module):
@@ -307,6 +290,7 @@ class CrossViewAttention(nn.Module):
 class Encoder(nn.Module):
     def __init__(
             self,
+            # dim: int = 256,
             dim: int = 128,
             middle: List[int] = [2, 2],
             scale: float = 1.0,
@@ -375,10 +359,12 @@ class Encoder(nn.Module):
         x = self.bev_embedding.get_prior()  # d H W
         x = repeat(x, '... -> b ...', b=b)  # b d H W
 
+        atts = []
         for cross_view, feature, layer in zip(self.cross_views, features, self.layers):
             feature = rearrange(feature, '(b n) ... -> b n ...', b=b, n=n)
 
-            x = cross_view(x, self.bev_embedding, feature, I_inv, E_inv)
+            x, att = cross_view(x, self.bev_embedding, feature, I_inv, E_inv)
             x = layer(x)
+            atts.append(att)
 
-        return x
+        return x, atts

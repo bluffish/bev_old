@@ -1,7 +1,7 @@
 import torch
 
-model_state_dict = torch.load("pretrained/model525000.pt")
-
+model_state_dict = torch.load("pretrained/cvt_nuscenes_vehicles_50k.ckpt")['state_dict']
+print(model_state_dict.keys())
 updated_state_dict = {}
 for key, value in model_state_dict.items():
     # Split the key using '.' as the delimiter
@@ -11,11 +11,7 @@ for key, value in model_state_dict.items():
     if key_parts[0] == "backbone":
         key_parts[0] = "module"
         new_key = '.'.join(key_parts)
-    else:
-        key_parts.insert(0, "module")
-        new_key = '.'.join(key_parts)
-        # new_key = key
 
-    updated_state_dict[new_key] = value
-torch.save(updated_state_dict, "pretrained/model_converted_headless.pt")
+        updated_state_dict[new_key] = value
+torch.save(updated_state_dict, "pretrained/model_converted.pt")
 print(updated_state_dict)

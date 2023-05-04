@@ -1,19 +1,5 @@
-
 from models.lss.lift_splat_shoot import *
 from models.gpn.density import Density, Evidence
-
-
-def get_class_probabilities(data):
-    l_c = torch.zeros(data.shape[1], device=data.x.device)
-
-    for c in range(data.shape[1]):
-        class_count = (data == c).int().sum()
-        l_c[c] = class_count
-
-    L = l_c.sum()
-    p_c = l_c / L
-
-    return p_c
 
 
 class BevEncodeGPN(nn.Module):

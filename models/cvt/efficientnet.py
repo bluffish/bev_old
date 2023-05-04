@@ -17,6 +17,12 @@ MODELS = {
         ('reduction_2', (3, 7)),
         ('reduction_3', (7, 11)),
         ('reduction_4', (11, 23)),
+    ],
+    'efficientnet-b5': [
+        ('reduction_1', (0, 3)),
+        ('reduction_2', (3, 7)),
+        ('reduction_3', (7, 11)),
+        ('reduction_4', (11, 23)),
     ]
 }
 

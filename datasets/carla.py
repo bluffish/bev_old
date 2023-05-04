@@ -212,7 +212,7 @@ class CarlaDataset(torch.utils.data.Dataset):
 
         return (torch.stack(imgs).float(),
                 torch.stack(rots).float(), torch.stack(trans).float(),
-                torch.stack(intrins).float(), torch.stack(post_rots).float(), torch.stack(post_trans).float(),
+                torch.stack(intrins).float(),  torch.zeros((1,1)), torch.stack(post_rots).float(), torch.stack(post_trans).float(),
                 label.float())
 
     def sample_augmentation(self):
@@ -243,7 +243,8 @@ class CarlaDataset(torch.utils.data.Dataset):
         return resize, resize_dims, crop, flip, rotate
 
 
-def compile_data(version, dataroot, batch_size, num_workers, ood=False):
+def compile_data(version, config, ood=False, augment_train=False, shuffle_train=True):
+    dataroot = os.path.join("../data", config['dataset'])
     train_dataset = CarlaDataset(os.path.join(dataroot, "train/"))
 
     if ood:
@@ -256,15 +257,15 @@ def compile_data(version, dataroot, batch_size, num_workers, ood=False):
         val_dataset.length = 128
 
     train_loader = torch.utils.data.DataLoader(train_dataset,
-                                               batch_size=batch_size,
+                                               batch_size=config['batch_size'],
                                                shuffle=True,
-                                               num_workers=num_workers,
+                                               num_workers=config['num_workers'],
                                                drop_last=True)
 
     val_loader = torch.utils.data.DataLoader(val_dataset,
-                                             batch_size=batch_size,
+                                             batch_size=config['batch_size'],
                                              shuffle=False,
-                                             num_workers=num_workers,
+                                             num_workers=config['num_workers'],
                                              drop_last=True)
 
     return train_loader, val_loader

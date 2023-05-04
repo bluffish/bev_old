@@ -1,11 +1,11 @@
 type: 'baseline'
 backbone: 'lss'
 dataset: 'nuscenes'
-logdir: 'nuscenes/lss_baseline_binary'
+logdir: 'nuscenes/lss_baseline_dual'
 gpus: [7]
 batch_size: 16
 num_workers: 16
 weight_decay: 0.0000001
 learning_rate: 0.001
-num_epochs: 100
+num_steps: 30000
 val_step: 1000

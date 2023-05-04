@@ -302,3 +302,25 @@ class LiftSplatShoot(nn.Module):
         x = self.bevencode(x)
 
         return x
+
+
+class LiftSplatShootENN(LiftSplatShoot):
+    def __init__(
+            self,
+            x_bound=[-50.0, 50.0, 0.5],
+            y_bound=[-50.0, 50.0, 0.5],
+            z_bound=[-10.0, 10.0, 20.0],
+            d_bound=[4.0, 45.0, 1.0],
+            final_dim=(128, 352),
+            outC=4
+    ):
+        super(LiftSplatShootENN, self).__init__(
+            x_bound=[-50.0, 50.0, 0.5],
+            y_bound=[-50.0, 50.0, 0.5],
+            z_bound=[-10.0, 10.0, 20.0],
+            d_bound=[4.0, 45.0, 1.0],
+            final_dim=(128, 352),
+            outC=4)
+
+    def forward(self, x, rots, trans, intrins, extrins, post_rots, post_trans):
+        return super().forward(x, rots, trans, intrins, extrins, post_rots, post_trans).relu() + 1

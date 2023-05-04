@@ -1,5 +1,5 @@
-from datasets.carla import compile_data as compile_data_carla
 from datasets.nuscenes import compile_data as compile_data_nuscenes, denormalize_img
+from datasets.carla import compile_data as compile_data_carla
 from sklearn.manifold import TSNE
 from sklearn.metrics import *
 from tqdm import tqdm
@@ -11,7 +11,6 @@ from tools.loss import *
 import argparse
 import yaml
 
-import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from torch import nn
@@ -23,15 +22,14 @@ sns.set_context("notebook", font_scale=1.5,
 
 
 def eval(config):
-    compile_data = compile_data_carla if config['dataset'] == 'carla' else compile_data_nuscenes
-    train_loader, val_loader = compile_data("trainval" if ood else "mini", f"../data/{config['dataset']}", config["batch_size"],
-                                            config['num_workers'], ood=ood, flipped=(config['backbone']=='lss'), augment_train=False)
-
     device = torch.device('cpu') if len(config['gpus']) < 0 else torch.device(f'cuda:{config["gpus"][0]}')
     num_classes, classes = 4, ["vehicle", "road", "lane", "background"]
 
+    compile_data = compile_data_carla if config['dataset'] == 'carla' else compile_data_nuscenes
+    train_loader, val_loader = compile_data("mini" if is_ood else "mini", config, shuffle_train=True, ood=is_ood)
+
     class_proportions = {
-        "nuscenes": [0.0206, 0.173, 0.0294, 0.777],
+        "nuscenes": [.015, .2, .05, .735],
         "carla": [0.0141, 0.3585, 0.02081, 0.6064]
     }
 
@@ -39,8 +37,11 @@ def eval(config):
 
     if config['type'] == 'baseline' or config['type'] == 'dropout' or config['type'] == 'ensemble':
         uncertainty_function = entropy
-    if config['type'] == 'enn' or config['type'] == 'postnet':
-        uncertainty_function = dissonance
+    elif config['type'] == 'enn' or config['type'] == 'postnet':
+        if is_ood:
+            uncertainty_function = vacuity
+        else:
+            uncertainty_function = dissonance
 
     if "postnet" in config['type']:
         if config['backbone'] == 'lss':
@@ -62,7 +63,8 @@ def eval(config):
     print(f"Eval using {config['dataset']} ")
     print("VAL LOADER: ", len(val_loader.dataset))
     print(f"OUTPUT DIRECTORY {config['logdir']} ")
-    print(f"OOD: {ood}")
+    print(f"OOD: {is_ood}")
+    print(f"MODEL PATH: {config['model_path']}")
     print("--------------------------------------------------")
 
     os.makedirs(config['logdir'], exist_ok=True)
@@ -94,7 +96,7 @@ def eval(config):
 
     iou = [0.0] * num_classes
 
-    if ood:
+    if is_ood:
         y_true = []
         y_score = []
     else:
@@ -102,52 +104,50 @@ def eval(config):
         y_score = [[], [], [], []]
 
     with torch.no_grad():
-        for (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels) in tqdm(val_loader):
-
+        for (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels, ood) in tqdm(val_loader):
             preds = model(imgs, rots, trans, intrins, extrins, post_rots, post_trans)
-            uncertainty = uncertainty_function(preds)
+            print(torch.min(preds))
+
+            uncertainty = uncertainty_function(preds).cpu()
+            preds = activation(preds)
 
             labels = labels.to(device)
-            plt.clf()
+            plt.imsave(os.path.join(config['logdir'], "uncertainty_map.jpg"),
+                       plt.cm.jet(uncertainty[0][0]))
+            save_pred(preds, labels, config['logdir'])
 
-            if ood:
+            if is_ood:
+                mask = torch.logical_or(uncertainty[:, 0, :, :] > .5, ood.cpu() == 1).bool()
+                l = ood[mask].ravel()
+                u = uncertainty[:, 0, :, :][mask].ravel()
+
                 cv2.imwrite(os.path.join(config['logdir'], "ood.jpg"),
-                           labels[0].cpu().numpy()*255)
-                # mask = np.logical_or(uncertainty[:, 0, :, :] > .5, labels.cpu() == 1).bool()
-                l = labels.ravel()
-                u = torch.tensor(uncertainty[:, 0, :, :]).ravel()
+                           ood[0].cpu().numpy()*255)
 
                 y_true += l.cpu()
                 y_score += u.cpu()
             else:
-                preds, loss = get_step(preds, labels, activation, loss_fn, config['type'])
                 intersect, union = get_iou(preds, labels)
-                draw(preds, imgs, rots, trans, intrins, post_rots, post_trans, labels)
 
                 for j in range(0, num_classes):
                     iou[j] += 1 if union[0] == 0 else intersect[j] / union[j] * preds.shape[0]
-
-                save_pred(preds, labels, config['logdir'])
-                plt.imsave(os.path.join(config['logdir'], "uncertainty_map.jpg"),
-                           plt.cm.jet(uncertainty[0][0]))
 
                 pmax = torch.argmax(preds, dim=1).cpu()
                 lmax = torch.argmax(labels, dim=1).cpu()
 
                 for j in range(num_classes):
-                    mask = np.logical_or(pmax == j, lmax == j).bool()
+                    mask = torch.logical_or(pmax == j, lmax == j).bool()
 
                     p = pmax[mask].ravel()
                     l = lmax[mask].ravel()
-                    u = torch.tensor(uncertainty[:, 0, :, :][mask]).ravel()
+                    u = uncertainty[:, 0, :, :][mask].ravel()
 
                     intersect = p != l
 
                     y_true[j] += intersect
                     y_score[j] += u
 
-
-    if ood:
+    if is_ood:
         pr, rec, _ = precision_recall_curve(y_true, y_score)
         fpr, tpr, _ = roc_curve(y_true, y_score)
 
@@ -202,17 +202,21 @@ def eval(config):
                   f"{classes[j]} CLASS - AUPR: {aupr} AUROC: {auroc}")
             plt.savefig(save_path)
 
-            # return pr, rec, fpr, tpr, aupr, auroc, iou[j]
+            return pr, rec, fpr, tpr, aupr, auroc, iou[j]
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("config")
     parser.add_argument('-g', '--gpus', nargs='+', required=False)
-    parser.add_argument('-o', '--ood', nargs='+', required=False)
+    parser.add_argument('-o', '--ood', default=False, action='store_true')
+    parser.add_argument('-b', '--batch_size', required=False)
+    parser.add_argument('-p', '--model_path', required=False)
+    parser.add_argument('-l', '--logdir', required=False)
 
     args = parser.parse_args()
 
-    ood = False
+    is_ood = False
 
     print(f"Using config {args.config}")
 
@@ -222,6 +226,12 @@ if __name__ == "__main__":
     if args.gpus is not None:
         config['gpus'] = [int(i) for i in args.gpus]
     if args.ood is not None:
-        ood = args.ood
+        is_ood = args.ood
+    if args.batch_size is not None:
+        config['batch_size'] = int(args.batch_size)
+    if args.model_path is not None:
+        config['model_path'] = args.model_path
+    if args.logdir is not None:
+        config['logdir'] = args.logdir
 
     eval(config)

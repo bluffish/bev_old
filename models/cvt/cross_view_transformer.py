@@ -1,10 +1,15 @@
-import torch
-import torch.nn as nn
-import numpy as np
-
 from models.cvt.decoder import *
 from models.cvt.encoder import *
 from models.gpn.density import Density, Evidence
+
+
+def convert(intrins):
+    intrins[:, :, 0, 0] *= W / 1600
+    intrins[:, :, 0, 2] *= W / 1600
+    intrins[:, :, 1, 1] *= (H + O) / 900
+    intrins[:, :, 1, 2] *= (H + O) / 900
+    intrins[:, :, 1, 2] -= O
+    return intrins
 
 
 class CrossViewTransformer(nn.Module):
@@ -25,25 +30,32 @@ class CrossViewTransformer(nn.Module):
             nn.ReLU(inplace=True),
             nn.Conv2d(dim_last, outC, 1))
 
-    def forward(self, imgs, rots, trans, intrins, extrins, post_rots, post_trans):
+    def forward(self, imgs, rots, trans, intrins, extrins, post_rots, post_trans, return_att=False):
         batch = {
             'image': imgs,
-            'intrinsics': self.convert(intrins),
+            'intrinsics': convert(intrins),
             'extrinsics': extrins
         }
-        x = self.encoder(batch)
+        x, atts = self.encoder(batch)
         y = self.decoder(x)
         z = self.to_logits(y)
 
-        return z
+        if return_att:
+            return z, atts
+        else:
+            return z
 
-    def convert(self, intrins):
-        intrins[:, :, 0, 0] *= W/1600
-        intrins[:, :, 0, 2] *= W/1600
-        intrins[:, :, 1, 1] *= (H+O)/900
-        intrins[:, :, 1, 2] *= (H+O)/900
-        intrins[:, :, 1, 2] -= O
-        return intrins
+
+class CrossViewTransformerENN(CrossViewTransformer):
+    def __init__(
+        self,
+        dim_last: int = 64,
+        outC: int = 4
+    ):
+        super(CrossViewTransformerENN, self).__init__(outC=outC, dim_last=dim_last)
+
+    def forward(self, imgs, rots, trans, intrins, extrins, post_rots, post_trans, return_att=False):
+        return super().forward(imgs, rots, trans, intrins, extrins, post_rots, post_trans).relu() + 1
 
 
 class CrossViewTransformerDropout(CrossViewTransformer):
@@ -66,16 +78,16 @@ class CrossViewTransformerDropout(CrossViewTransformer):
 
         self.decoder.dropout = True
 
-    def forward(self, x, rots, trans, intrins, extrins, post_rots, post_trans):
+    def forward(self, imgs, rots, trans, intrins, extrins, post_rots, post_trans, return_att=False):
         if self.tests > 0:
             outputs = []
 
             for i in range(self.tests):
-                outputs.append(super().forward(x, rots, trans, intrins, post_rots, post_trans))
+                outputs.append(super().forward(imgs, rots, trans, intrins, post_rots, post_trans))
 
             return torch.mean(torch.stack(outputs), dim=0)
         else:
-            return super().forward(x, rots, trans, intrins, extrins, post_rots, post_trans)
+            return super().forward(imgs, rots, trans, intrins, extrins, post_rots, post_trans)
 
 
 class CrossViewTransformerEnsemble(CrossViewTransformer):
@@ -89,11 +101,11 @@ class CrossViewTransformerEnsemble(CrossViewTransformer):
         num_models = 5
         self.models = nn.ModuleList([CrossViewTransformer(outC=outC) for _ in range(num_models)])
 
-    def forward(self, x, rots, trans, intrins, extrins, post_rots, post_trans):
+    def forward(self, imgs, rots, trans, intrins, extrins, post_rots, post_trans, return_att=False):
         outputs = []
 
         for model in self.models:
-            outputs.append(model(x, rots, trans, intrins, extrins, post_rots, post_trans))
+            outputs.append(model(imgs, rots, trans, intrins, extrins, post_rots, post_trans))
 
         return torch.mean(torch.stack(outputs), dim=0)
 
@@ -120,14 +132,14 @@ class CrossViewTransformerGPN(CrossViewTransformer):
         self.last = nn.Conv2d(outC, outC, 1)
         self.p_c = None
 
-    def forward(self, imgs, rots, trans, intrins, extrins, post_rots, post_trans):
+    def forward(self, imgs, rots, trans, intrins, extrins, post_rots, post_trans, return_att=False):
         batch = {
             'image': imgs,
             'intrinsics': self.convert(intrins),
             'extrinsics': extrins
         }
 
-        x = self.encoder(batch)
+        x, atts = self.encoder(batch)
         x = self.decoder(x)
         x = self.to_logits(x)
 
@@ -146,6 +158,10 @@ class CrossViewTransformerGPN(CrossViewTransformer):
 
         if self.last is not None:
             beta = self.last(beta.log()).exp()
+
         alpha = beta + 1
 
-        return alpha.clamp(min=1e-4)
+        if return_att:
+            return alpha.clamp(min=1e-4), atts
+        else:
+            return alpha.clamp(min=1e-4)

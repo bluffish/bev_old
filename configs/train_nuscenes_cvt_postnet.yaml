@@ -1,11 +1,11 @@
 type: 'postnet'
 backbone: 'cvt'
 dataset: 'nuscenes'
-logdir: 'nuscenes/cvt_postnet'
+logdir: 'nuscenes/cvt_postnet_testy'
 gpus: [0]
-batch_size: 16
+batch_size: 32
 num_workers: 16
 weight_decay: 0.0000001
 learning_rate: 0.004
-num_epochs: 100
+num_steps: 20000
 val_step: 1000

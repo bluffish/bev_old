@@ -4,74 +4,21 @@ from torch import Tensor
 from torch.nn import functional as F
 from typing import Optional
 
-def activate_gpn(alpha):
-    prob = alpha / torch.sum(alpha, dim=1, keepdim=True)
-    return prob
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+import torch.distributions as dist
 
-
-torch.multiprocessing.set_sharing_strategy('file_system')
-from fvcore.nn import sigmoid_focal_loss
-
-
-class SigmoidFocalLoss(torch.nn.Module):
-    def __init__(
-        self,
-        alpha=-1.0,
-        gamma=2.0,
-        reduction='mean'
-    ):
-        super().__init__()
-
-        self.alpha = alpha
-        self.gamma = gamma
-        self.reduction = reduction
-
-    def forward(self, pred, label):
-        return sigmoid_focal_loss(pred, label, self.alpha, self.gamma, self.reduction)
-
-def scatter(x, classes, colors):
-    cps_df = pd.DataFrame(columns=['CP1', 'CP2', 'target'],
-                          data=np.column_stack((x, colors)))
-    cps_df['target'] = cps_df['target'].astype(int)
-    cps_df.head()
-    grid = sns.FacetGrid(cps_df, hue="target", height=10, legend_out=False)
-    plot = grid.map(plt.scatter, 'CP1', 'CP2')
-    plot.add_legend()
-    for t, l in zip(plot._legend.texts, classes):
-        t.set_text(l)
-
-    return plot
+from tools.uncertainty import activate_uce, vacuity
 
 
 class FocalLoss(nn.Module):
-    """ Focal Loss, as described in https://arxiv.org/abs/1708.02002.
-
-    It is essentially an enhancement to cross entropy loss and is
-    useful for classification tasks when there is a large class imbalance.
-    x is expected to contain raw, unnormalized scores for each class.
-    y is expected to contain class labels.
-
-    Shape:
-        - x: (batch_size, C) or (batch_size, C, d1, d2, ..., dK), K > 0.
-        - y: (batch_size,) or (batch_size, d1, d2, ..., dK), K > 0.
-    """
-
     def __init__(self,
                  alpha: Optional[Tensor] = None,
                  gamma: float = 0.,
                  reduction: str = 'mean',
                  ignore_index: int = -100):
-        """Constructor.
-
-        Args:
-            alpha (Tensor, optional): Weights for each class. Defaults to None.
-            gamma (float, optional): A constant, as described in the paper.
-                Defaults to 0.
-            reduction (str, optional): 'mean', 'sum' or 'none'.
-                Defaults to 'mean'.
-            ignore_index (int, optional): class label to ignore.
-                Defaults to -100.
-        """
         if reduction not in ('mean', 'sum', 'none'):
             raise ValueError(
                 'Reduction must be one of: "mean", "sum", "none".')
@@ -93,7 +40,7 @@ class FocalLoss(nn.Module):
         return f'{type(self).__name__}({arg_str})'
 
     def forward(self, x: Tensor, y: Tensor) -> Tensor:
-        y = torch.argmax(y, dim=1)
+        y = y.argmax(dim=1)
         if x.ndim > 2:
             # (N, C, d1, d2, ..., dK) --> (N * d1 * ... * dK, C)
             c = x.shape[1]
@@ -130,34 +77,101 @@ class FocalLoss(nn.Module):
 
         return loss
 
-def loss_reduce(
-        loss: torch.Tensor,
-        reduction: str = 'sum') -> torch.Tensor:
 
-    if reduction == 'sum':
-        return loss.sum()
+class UCELossReg(torch.nn.Module):
+    def __init__(
+        self,
+        weights: Optional[Tensor] = None,
+        l = 0.01
+    ):
+        super().__init__()
 
-    if reduction == 'mean':
-        return loss.mean()
+        self.weights = weights
+        self.loss_fn = UCELoss(weights)
+        self.l = l
 
-    if reduction == 'none':
-        return loss
+    def forward(self, alpha, y, ood):
+        A = self.loss_fn(alpha, y)
 
-    raise ValueError(f'{reduction} is not a valid value for reduction')
+        mask = ood.unsqueeze(1).repeat(1,4,1,1).bool()
+
+        a_m = alpha[mask].view(1, alpha.shape[1], -1)
+        pred = dist.Dirichlet(a_m)
+
+        target = dist.Dirichlet(torch.ones_like(a_m))
+        reg = dist.kl.kl_divergence(target, pred)
+
+        return A + torch.mean(reg) * self.l
 
 
-def uce_loss(
-        alpha: torch.Tensor,
-        y: torch.Tensor,
-        reduction: str = 'mean') -> torch.Tensor:
+class UCELoss(torch.nn.Module):
+    def __init__(
+        self,
+        weights: Optional[Tensor] = None,
+    ):
+        super().__init__()
 
-    S = torch.sum(alpha, dim=1, keepdim=True)
+        self.weights = weights
 
-    B = y * (torch.digamma(S + 1e-10) - torch.digamma(alpha + 1e-10) + 1e-10)
+    def forward(self, alpha, y):
 
-    B[:, 0, :, :] *= 3
-    B[:, 2, :, :] *= 3
+        S = torch.sum(alpha, dim=1, keepdim=True)
 
-    A = torch.sum(B, dim=1, keepdim=True)
+        B = y * (torch.digamma(S + 1e-10) - torch.digamma(alpha + 1e-10) + 1e-10)
+        # (bsx x 4 x 200 x 200)
 
-    return loss_reduce(A, reduction=reduction)
+        if self.weights is not None:
+            for i in range(self.weights.shape[0]):
+                B[:, i, :, :] *= self.weights[i]
+
+        A = torch.sum(B, dim=1, keepdim=True)
+
+        return A.mean()
+
+
+class FocalUCELoss(torch.nn.Module):
+    def __init__(
+        self,
+        n=2,
+        weights: Optional[Tensor] = None,
+    ):
+        super().__init__()
+
+        self.weights = weights
+        self.n = n
+
+    def forward(self, alpha, y):
+        S = torch.sum(alpha, dim=1, keepdim=True)
+
+        a0 = S
+        aj = torch.gather(alpha, 1, torch.argmax(y, dim=1, keepdim=True))
+
+        B = (gamma(a0 - aj + self.n) * gamma(a0)
+             / (gamma(a0 + self.n) * gamma(a0 - aj))) \
+            * torch.digamma(a0 + self.n + 1e-10) - torch.digamma(aj + 1e-10)
+
+        if self.weights is not None:
+            for i in range(self.weights.shape[0]):
+                B[:, i, :, :] *= self.weights[i]
+
+        A = torch.sum(B, dim=1, keepdim=True)
+
+        return A.mean()
+
+
+def gamma(x):
+    return torch.exp(torch.lgamma(x))
+
+
+def scatter(x, classes, colors):
+    cps_df = pd.DataFrame(columns=['CP1', 'CP2', 'target'],
+                          data=np.column_stack((x, colors)))
+    cps_df['target'] = cps_df['target'].astype(int)
+    cps_df.head()
+    grid = sns.FacetGrid(cps_df, hue="target", height=10, legend_out=False)
+    plot = grid.map(plt.scatter, 'CP1', 'CP2')
+    plot.add_legend()
+    for t, l in zip(plot._legend.texts, classes):
+        t.set_text(l)
+
+    return plot

@@ -9,7 +9,7 @@ def graph():
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
 
-    configs = ["./configs/eval_nuscenes_baseline_ce.yaml", "./configs/eval_nuscenes_baseline_ce_old.yaml"]
+    configs = ["./configs/eval_nuscenes_lss_baseline.yaml", "./configs/eval_nuscenes_lss_postnet.yaml", "./configs/eval_nuscenes_cvt_baseline.yaml"]
 
     for c in configs:
         with open(c, 'r') as file:
@@ -17,8 +17,9 @@ def graph():
 
         pr, rec, fpr, tpr, aupr, auroc, iou = eval(config)
 
-        ax1.plot(fpr, tpr, label=f"{config['type']}\nAUROC={auroc:.3f}, mIOU={iou:.3f}")
-        ax2.plot(rec, pr, label=f"{config['type']}\nAUPR={aupr:.3f}, mIOU={iou:.3f}")
+        ax1.plot(fpr, tpr, label=f"{config['backbone']}_{config['type']}\nAUROC={auroc:.3f}")
+        ax2.plot(rec, pr, label=f"{config['backbone']}_{config['type']}\nAUPR={aupr:.3f}")
+        # , mIOU = {iou: .3f}
 
     ax1.set_ylim([-.05, 1.05])
     ax1.set_xlim([-.05, 1.05])
