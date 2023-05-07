@@ -9,6 +9,7 @@ import cv2
 from pyquaternion import Quaternion
 from nuscenes.eval.common.utils import quaternion_yaw
 from nuscenes.nuscenes import NuScenes
+from nuscenes.utils.geometry_utils import view_points, box_in_image, BoxVisibility, transform_matrix
 from nuscenes.utils.splits import create_splits_scenes
 from nuscenes.utils.data_classes import Box
 from nuscenes.map_expansion.map_api import NuScenesMap
@@ -147,8 +148,17 @@ class NuscData(torch.utils.data.Dataset):
                      'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT'],
             'Ncams': ncams,
         }
-        self.ood_classes = ['vehicle.bus.rigid', "vehicle.bus.bendy"]
-        self.id_classes = ['vehicle.bus.rigid', "vehicle.bus.bendy"]
+        self.ood_classes_train = ['vehicle.bus.rigid', "vehicle.bus.bendy"]
+        self.ood_classes_val = ['vehicle.construction']
+
+        self.all_ood = ['vehicle.construction', 'vehicle.bus.rigid', "vehicle.bus.bendy"]
+
+        if is_train:
+            self.ood_labels = self.ood_classes_train
+        else:
+            self.ood_labels = self.ood_classes_train
+
+        print(f"OOD labels: {self.ood_labels}")
 
         self.nusc = nusc
         self.nusc_maps = nusc_maps
@@ -164,7 +174,7 @@ class NuscData(torch.utils.data.Dataset):
         dx, bx, nx = gen_dx_bx(self.grid_conf['xbound'], self.grid_conf['ybound'], self.grid_conf['zbound'])
         self.dx, self.bx, self.nx = dx.numpy(), bx.numpy(), nx.numpy()
 
-        self.fix_nuscenes_formatting()
+        # self.fix_nuscenes_formatting()
         self.scene2map = {}
         for rec in nusc.scene:
             log = nusc.get('log', rec['log_token'])
@@ -232,9 +242,10 @@ class NuscData(torch.utils.data.Dataset):
             for tok in rec['anns']:
                 inst = self.nusc.get('sample_annotation', tok)
 
-                # print(inst[])
-                if inst['category_name'] in self.ood_classes:
+                if inst['category_name'] in self.ood_labels:
                     ood.append(rec)
+
+                if inst['category_name'] in self.all_ood:
                     c = True
                     break
 
@@ -271,6 +282,7 @@ class NuscData(torch.utils.data.Dataset):
         extrins = []
         post_rots = []
         post_trans = []
+        oods = []
 
         lidar_record = self.nusc.get('sample_data', rec['data']['LIDAR_TOP'])
         egolidar = self.nusc.get('ego_pose', lidar_record['ego_pose_token'])
@@ -278,8 +290,25 @@ class NuscData(torch.utils.data.Dataset):
 
         for cam in cams:
             samp = self.nusc.get('sample_data', rec['data'][cam])
+            ood = np.zeros((56, 120))
+            data_path, boxes, camera_intrinsic = self.nusc.get_sample_data(
+                rec['data'][cam],
+                box_vis_level=BoxVisibility.ALL)
+            for box in boxes:
+                if box.name in self.ood_labels:
+                    corners = view_points(box.corners(), camera_intrinsic, normalize=True)[:2, :]
+                    corners = np.round(corners * .3 / 4)
+
+                    corners = np.int32(corners).T
+
+                    for i in range(8):
+                        for j in range(8):
+                            cv2.fillConvexPoly(ood, corners[i:j], color=1)
+
+
             imgname = os.path.join(self.nusc.dataroot, samp['filename'])
             img = Image.open(imgname)
+
             post_rot = torch.eye(2)
             post_tran = torch.zeros(2)
 
@@ -318,9 +347,10 @@ class NuscData(torch.utils.data.Dataset):
             trans.append(tran)
             post_rots.append(post_rot)
             post_trans.append(post_tran)
+            oods.append(torch.tensor(ood))
 
         return (torch.stack(imgs), torch.stack(rots), torch.stack(trans),
-                torch.stack(intrins), torch.stack(extrins), torch.stack(post_rots), torch.stack(post_trans))
+                torch.stack(intrins), torch.stack(extrins), torch.stack(post_rots), torch.stack(post_trans), torch.stack(oods))
 
     def get_label(self, rec):
         egopose = self.nusc.get('ego_pose',
@@ -337,7 +367,7 @@ class NuscData(torch.utils.data.Dataset):
             if int(inst['visibility_token']) <= 2:
                 continue
 
-            if inst['category_name'] in self.ood_classes:
+            if inst['category_name'] in self.ood_labels:
                 box = Box(inst['translation'], inst['size'], Quaternion(inst['rotation']))
                 box.translate(trans)
                 box.rotate(rot)
@@ -348,7 +378,8 @@ class NuscData(torch.utils.data.Dataset):
                 ).astype(np.int32)
                 pts[:, [1, 0]] = pts[:, [0, 1]]
                 cv2.fillPoly(ood, [pts], 1.0)
-            elif inst['category_name'].split('.')[0] == 'vehicle':
+
+            if not inst['category_name'] in self.all_ood and inst['category_name'].split('.')[0] == 'vehicle':
                 box = Box(inst['translation'], inst['size'], Quaternion(inst['rotation']))
                 box.translate(trans)
                 box.rotate(rot)
@@ -398,14 +429,12 @@ class NuscData(torch.utils.data.Dataset):
         return len(self.ixes)
 
     def __getitem__(self, index):
-        t0 = time()
         rec = self.ixes[index]
 
         cams = self.choose_cams()
-        imgs, rots, trans, intrins, extrins, post_rots, post_trans = self.get_image_data(rec, cams)
+        imgs, rots, trans, intrins, extrins, post_rots, post_trans, ood_cam = self.get_image_data(rec, cams)
         label, ood = self.get_label(rec)
-        # print(time()-t0)
-        return imgs, rots, trans, intrins, extrins, post_rots, post_trans, label, ood
+        return imgs, rots, trans, intrins, extrins, post_rots, post_trans, label, ood, ood_cam
 
 
 def worker_rnd_init(x):
@@ -465,6 +494,6 @@ def compile_data(version, config, ood=False, augment_train=False, shuffle_train=
                                              num_workers=config['num_workers'],
                                              drop_last=True,
                                              pin_memory=True,
-                                             worker_init_fn=worker_rnd_init)
+                                             )
 
     return train_loader, val_loader

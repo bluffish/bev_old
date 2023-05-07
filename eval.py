@@ -26,7 +26,7 @@ def eval(config):
     num_classes, classes = 4, ["vehicle", "road", "lane", "background"]
 
     compile_data = compile_data_carla if config['dataset'] == 'carla' else compile_data_nuscenes
-    train_loader, val_loader = compile_data("mini" if is_ood else "mini", config, shuffle_train=True, ood=is_ood)
+    train_loader, val_loader = compile_data("trainval" if is_ood else "mini", config, shuffle_train=True, ood=is_ood)
 
     class_proportions = {
         "nuscenes": [.015, .2, .05, .735],
@@ -103,10 +103,14 @@ def eval(config):
         y_true = [[], [], [], []]
         y_score = [[], [], [], []]
 
+    c = 0
+
     with torch.no_grad():
-        for (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels, ood) in tqdm(val_loader):
+        for (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels, ood) in tqdm(train_loader):
+            c += 1
+            if c > 15:
+                break
             preds = model(imgs, rots, trans, intrins, extrins, post_rots, post_trans)
-            print(torch.min(preds))
 
             uncertainty = uncertainty_function(preds).cpu()
             preds = activation(preds)
@@ -118,8 +122,10 @@ def eval(config):
 
             if is_ood:
                 mask = torch.logical_or(uncertainty[:, 0, :, :] > .5, ood.cpu() == 1).bool()
-                l = ood[mask].ravel()
-                u = uncertainty[:, 0, :, :][mask].ravel()
+                # l = ood[mask].ravel()
+                # u = uncertainty[:, 0, :, :][mask].ravel()
+                l = ood.ravel()
+                u = uncertainty[:,0,:,:].ravel()
 
                 cv2.imwrite(os.path.join(config['logdir'], "ood.jpg"),
                            ood[0].cpu().numpy()*255)

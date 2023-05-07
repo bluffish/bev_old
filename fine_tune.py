@@ -35,7 +35,7 @@ def get_val(model, val_loader, device, loss_fn, activation, num_classes):
     c = 0
 
     with torch.no_grad():
-        for (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels, ood) in tqdm(val_loader):
+        for (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels, ood, ood_cam) in tqdm(val_loader):
             preds = model(imgs, rots, trans, intrins, extrins, post_rots, post_trans)
             uncertainty = vacuity(preds).cpu()
             labels = labels.to(device)
@@ -98,9 +98,9 @@ def train():
     model.p_c = torch.tensor(class_proportions[config['dataset']])
     model = nn.DataParallel(model, device_ids=config['gpus']).to(device).train()
 
-    pretrained = os.path.join("./nuscenes/cvt_enn", "best_iou.pt")
-    print(f"Loading pretrained weights from {pretrained}")
-    model.load_state_dict(torch.load(pretrained))
+    if "pretrained" in config:
+        print(f"Loading pretrained weights from {config['pretrained']}")
+        model.load_state_dict(torch.load(config["pretrained"]))
 
     opt = torch.optim.AdamW(model.parameters(), lr=config['learning_rate'], weight_decay=config['weight_decay'])
 
@@ -129,7 +129,7 @@ def train():
     epoch = 0
 
     while True:
-        for batchi, (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels, ood) in enumerate(
+        for batchi, (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels, ood, ood_cam) in enumerate(
                 train_loader):
             t0 = time()
             opt.zero_grad(set_to_none=True)
@@ -153,6 +153,10 @@ def train():
                        plt.cm.jet(uncertainty[0][0].detach().cpu().numpy()))
             cv2.imwrite(os.path.join(config['logdir'], "ood.jpg"),
                         ood[0].cpu().numpy() * 255)
+
+            for cam_idx in range(6):
+                cv2.imwrite(os.path.join(config['logdir'], f"ood{cam_idx}.jpg"),
+                            ood_cam[0,cam_idx].cpu().numpy() * 255)
 
             if step % 10 == 0:
                 print(step, loss.item())
@@ -221,6 +225,8 @@ if __name__ == "__main__":
 
     parser.add_argument("config")
     parser.add_argument('-g', '--gpus', nargs='+', required=False)
+    parser.add_argument('-b', '--batch_size', required=False)
+    parser.add_argument('-l', '--logdir', required=False)
 
     args = parser.parse_args()
 
@@ -231,5 +237,10 @@ if __name__ == "__main__":
 
     if args.gpus is not None:
         config['gpus'] = [int(i) for i in args.gpus]
+    if args.batch_size is not None:
+        config['batch_size'] = int(args.batch_size)
+    if args.logdir is not None:
+        config['logdir'] = args.logdir
+
 
     train()

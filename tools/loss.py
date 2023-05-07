@@ -9,9 +9,11 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 import torch.distributions as dist
-
+import cv2
 from tools.uncertainty import activate_uce, vacuity
+import torchvision
 
+from einops import rearrange
 
 class FocalLoss(nn.Module):
     def __init__(self,
@@ -82,7 +84,7 @@ class UCELossReg(torch.nn.Module):
     def __init__(
         self,
         weights: Optional[Tensor] = None,
-        l = 0.01
+        l = 0.00005
     ):
         super().__init__()
 
@@ -102,6 +104,76 @@ class UCELossReg(torch.nn.Module):
         reg = dist.kl.kl_divergence(target, pred)
 
         return A + torch.mean(reg) * self.l
+
+
+hw = [
+    (56, 120),
+    (14, 30),
+]
+
+
+def unravel_index(indices, shape):
+    unraveled_indices = []
+    for dim in reversed(shape):
+        unraveled_indices.append(indices % dim)
+        indices = indices // dim
+    return tuple(reversed(unraveled_indices))
+
+
+class UCELossRegMap(torch.nn.Module):
+    def __init__(
+        self,
+        weights: Optional[Tensor] = None,
+        l=0.00005
+    ):
+        super().__init__()
+
+        self.weights = weights
+        self.loss_fn = UCELoss(weights)
+        self.l = l
+        self.bce = torch.nn.BCELoss()
+
+    def forward(self, alpha, y, ood, ood_cam, atts):
+        A = self.loss_fn(alpha, y)
+
+        mask = torch.zeros((alpha.shape[0], 25, 25))
+
+        rearranged_atts = []
+        for i, att in enumerate(atts):
+            r = rearrange(att, '(b m) (H W) (n h w) -> b m H W n h w', n=6, m=4, H=25, W=25, h=hw[i][0],
+                                      w=hw[i][1])
+            rearranged_atts.append(r)
+
+        att = rearranged_atts[0]
+        mean_att = torch.mean(att, dim=1)
+
+        for i in range(alpha.shape[0]):
+            for r in range(25):
+                for c in range(25):
+                    att_map = mean_att[i,r,c]
+                    l = att_map.argmax()
+
+                    my = l % 56
+                    l = l // 56
+                    mx = l % 120
+                    l = l // 120
+                    mc = l % 60
+
+                    mask[i, r, c] = ood_cam[i, mc, my, mx]
+
+        mask = torch.nn.functional.interpolate(mask.unsqueeze(0), size=(200, 200)).to(ood.device)
+        cv2.imwrite("mask.jpg", mask[0,0].detach().cpu().numpy()*255)
+        #
+        reg = self.bce(mask[0].float(), ood.float())
+        # mask = mask.unsqueeze(0).repeat(1,4,1,1)
+
+        # mask = mask.bool()
+        # a_m = alpha[mask].view(1, alpha.shape[1], -1)
+        # pred = dist.Dirichlet(a_m)
+        #
+        # target = dist.Dirichlet(torch.ones_like(a_m))
+        # reg = dist.kl.kl_divergence(target, pred)
+        return reg
 
 
 class UCELoss(torch.nn.Module):

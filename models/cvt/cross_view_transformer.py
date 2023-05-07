@@ -55,6 +55,9 @@ class CrossViewTransformerENN(CrossViewTransformer):
         super(CrossViewTransformerENN, self).__init__(outC=outC, dim_last=dim_last)
 
     def forward(self, imgs, rots, trans, intrins, extrins, post_rots, post_trans, return_att=False):
+        if return_att:
+            p, a = super().forward(imgs, rots, trans, intrins, extrins, post_rots, post_trans, return_att=True)
+            return p.relu() + 1, a
         return super().forward(imgs, rots, trans, intrins, extrins, post_rots, post_trans).relu() + 1
 
 

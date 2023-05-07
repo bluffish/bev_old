@@ -14,13 +14,12 @@ import argparse
 import yaml
 from tqdm import tqdm
 import random
-import warnings
 
-warnings.filterwarnings("ignore", category=DeprecationWarning)
 torch.backends.cudnn.enabled = False
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 
 torch.multiprocessing.set_sharing_strategy('file_system')
+
 random.seed(1)
 np.random.seed(1)
 torch.manual_seed(1)
@@ -35,23 +34,16 @@ def get_val(model, val_loader, device, loss_fn, activation, num_classes):
     y_score_m = []
     c = 0
 
-    if config['type'] == 'dropout':
-        model.module.tests = 20
-        model.module.train()
-
     with torch.no_grad():
-        for (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels, ood) in tqdm(val_loader):
+        for (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels, ood, ood_cam) in tqdm(val_loader):
             preds = model(imgs, rots, trans, intrins, extrins, post_rots, post_trans)
+            uncertainty = vacuity(preds).cpu()
             labels = labels.to(device)
+            ood = ood.to(device)
 
-            if config['type'] == 'baseline' or config['type'] == 'dropout' or config['type'] == 'ensemble':
-                uncertainty = entropy(preds).cpu()
-            if config['type'] == 'enn' or config['type'] == 'postnet':
-                uncertainty = dissonance(preds).cpu()
-
-            loss = loss_fn(preds, labels)
+            loss = loss_fn(preds, labels, ood)
             preds = activation(preds)
-            
+
             total_loss += loss * preds.shape[0]
             intersection, union = get_iou(preds, labels)
 
@@ -62,21 +54,19 @@ def get_val(model, val_loader, device, loss_fn, activation, num_classes):
                     iou[i] += intersection[i] / union[i] * preds.shape[0]
 
             if c < 100:
-                pmax = torch.argmax(preds, dim=1).cpu()
-                lmax = torch.argmax(labels, dim=1).cpu()
+                save_pred(preds, labels, config['logdir'])
 
-                mask = torch.logical_or(pmax == 0, lmax == 0).bool()
-
-                p = pmax[mask].ravel()
-                l = lmax[mask].ravel()
+                mask = np.logical_or(uncertainty[:, 0, :, :].cpu() > .5, ood.cpu() == 1).bool()
+                l = ood[mask].ravel()
                 u = uncertainty[:, 0, :, :][mask].ravel()
 
-                intersect = p != l
+                plt.imsave(os.path.join(config['logdir'], "uncertainty_map.jpg"),
+                           plt.cm.jet(uncertainty[0][0].cpu()))
+                cv2.imwrite(os.path.join(config['logdir'], "ood.jpg"),
+                            ood[0].cpu().numpy() * 255)
 
-                y_true_m += intersect
-                y_score_m += u
-
-                c += preds.shape[0]
+                y_true_m += l.cpu()
+                y_score_m += u.cpu()
 
     iou = [i / len(val_loader.dataset) for i in iou]
 
@@ -87,48 +77,34 @@ def get_val(model, val_loader, device, loss_fn, activation, num_classes):
         auroc = 0
         aupr = 0
 
-    if config['type'] == 'dropout':
-        model.module.tests = -1
-
     return total_loss / len(val_loader.dataset), iou, auroc, aupr
 
 
 def train():
     device = torch.device('cpu') if len(config['gpus']) < 0 else torch.device(f'cuda:{config["gpus"][0]}')
     num_classes, classes = 4, ["vehicle", "road", "lane", "background"]
-
     compile_data = compile_data_carla if config['dataset'] == 'carla' else compile_data_nuscenes
-    train_loader, val_loader = compile_data("trainval", config, shuffle_train=True)
+    train_loader, val_loader = compile_data("mini", config, shuffle_train=True, ood=True)
 
     class_proportions = {
         "nuscenes": [.015, .2, .05, .735],
-        # "nuscenes": [0.0206, 0.173, 0.0294, 0.777],
         "carla": [0.0141, 0.3585, 0.02081, 0.6064]
     }
 
-    activation, loss_fn, model = get_model(config['type'], config['backbone'], num_classes, device)
+    activation = activate_uce
+    loss_fn = UCELossRegMap(weights=torch.tensor([3.0, 1.0, 2.0, 1.0])).to(device)
+    model = CrossViewTransformerENN(outC=4)
 
-    if "postnet" in config['type']:
-        if config['backbone'] == 'lss':
-            model.bevencode.p_c = torch.tensor(class_proportions[config['dataset']])
-        else:
-            model.p_c = torch.tensor(class_proportions[config['dataset']])
-
+    model.p_c = torch.tensor(class_proportions[config['dataset']])
     model = nn.DataParallel(model, device_ids=config['gpus']).to(device).train()
 
     if "pretrained" in config:
         print(f"Loading pretrained weights from {config['pretrained']}")
         model.load_state_dict(torch.load(config["pretrained"]))
 
-    if config['backbone'] == 'lss':
-        opt = torch.optim.Adam(model.parameters(), lr=config['learning_rate'], weight_decay=config['weight_decay'])
-        scheduler = None
-        print("Using Adam")
-    else:
-        opt = torch.optim.AdamW(model.parameters(), lr=config['learning_rate'], weight_decay=config['weight_decay'])
-        scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, div_factor=10, pct_start=.3, final_div_factor=10,
-                                                        max_lr=config['learning_rate'], total_steps=config['num_steps'])
-        print("Using AdamW and OneCycleLR")
+    opt = torch.optim.AdamW(model.parameters(), lr=config['learning_rate'], weight_decay=config['weight_decay'])
+
+    print("Using AdamW and OneCycleLR")
 
     os.makedirs(config['logdir'], exist_ok=True)
 
@@ -143,6 +119,7 @@ def train():
     print("--------------------------------------------------")
 
     writer = SummaryWriter(logdir=config['logdir'])
+    uncertainty_function = vacuity
 
     best_iou = 0.0
     best_auroc = 0.0
@@ -152,15 +129,25 @@ def train():
     epoch = 0
 
     while True:
-        for batchi, (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels, ood) in enumerate(
-                train_loader):
+        for batchi, (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels, ood, ood_cam) in enumerate(
+                val_loader):
             t0 = time()
             opt.zero_grad(set_to_none=True)
 
-            preds = model(imgs, rots, trans, intrins, extrins, post_rots, post_trans)
-            labels = labels.to(device)
+            for cam_idx in range(6):
+                cv2.imwrite(os.path.join(config['logdir'], f"ood{cam_idx}.jpg"),
+                            ood_cam[0,cam_idx].cpu().numpy() * 255)
+                cv2.imwrite(os.path.join(config['logdir'], f"cam{cam_idx}.jpg"),
+                            imgs[0,cam_idx].permute(1, 2, 0).cpu().numpy() * 255)
 
-            loss = loss_fn(preds, labels)
+
+            preds, atts = model(imgs, rots, trans, intrins, extrins, post_rots, post_trans, return_att=True)
+            uncertainty = uncertainty_function(preds).cpu()
+            labels = labels.to(device)
+            ood = ood.to(device)
+            ood_cam = ood_cam.to(device)
+
+            loss = loss_fn(preds, labels, ood, ood_cam, atts)
             preds = activation(preds)
 
             loss.backward()
@@ -170,9 +157,10 @@ def train():
             step += 1
             t1 = time()
 
-            if scheduler is not None:
-                scheduler.step()
-
+            plt.imsave(os.path.join(config['logdir'], "uncertainty_map.jpg"),
+                       plt.cm.jet(uncertainty[0][0].detach().cpu().numpy()))
+            cv2.imwrite(os.path.join(config['logdir'], "ood.jpg"),
+                        ood[0].cpu().numpy() * 255)
             if step % 10 == 0:
                 print(step, loss.item())
 
@@ -183,6 +171,11 @@ def train():
             if step % 50 == 0:
                 intersection, union = get_iou(preds, labels)
                 iou = [intersection[i] / union[i] for i in range(0, num_classes)]
+
+                cv2.imwrite(os.path.join(config['logdir'], "binary_preds.jpg"),
+                            preds[0, 0].detach().cpu().numpy() * 255)
+                cv2.imwrite(os.path.join(config['logdir'], "binary_labels.jpg"),
+                            labels[0, 0].detach().cpu().numpy() * 255)
 
                 print(step, "iou: ", iou)
 
@@ -235,6 +228,8 @@ if __name__ == "__main__":
 
     parser.add_argument("config")
     parser.add_argument('-g', '--gpus', nargs='+', required=False)
+    parser.add_argument('-b', '--batch_size', required=False)
+    parser.add_argument('-l', '--logdir', required=False)
 
     args = parser.parse_args()
 
@@ -245,5 +240,10 @@ if __name__ == "__main__":
 
     if args.gpus is not None:
         config['gpus'] = [int(i) for i in args.gpus]
+    if args.batch_size is not None:
+        config['batch_size'] = int(args.batch_size)
+    if args.logdir is not None:
+        config['logdir'] = args.logdir
+
 
     train()

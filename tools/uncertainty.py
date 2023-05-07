@@ -22,11 +22,10 @@ def entropy_dropout(pred):
     return total_un
 
 
-def dissonance(mean):
-    evidence = mean + 1
-    alpha = mean + 2
+def dissonance(alpha):
     S = torch.sum(alpha, dim=1, keepdim=True)
 
+    evidence = alpha - 1
     belief = evidence / S
     dis_un = torch.zeros_like(S)
     for k in range(belief.shape[0]):
@@ -41,9 +40,7 @@ def dissonance(mean):
                     term_bj += bj
             dis_ki = bi * term_Bal / (term_bj + 1e-7)
             dis_un[k] += dis_ki
-
     return dis_un
-
 
 def Bal(b_i, b_j):
     result = 1 - torch.abs(b_i - b_j) / (b_i + b_j + 1e-7)

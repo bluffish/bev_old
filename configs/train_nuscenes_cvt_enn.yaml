@@ -1,7 +1,7 @@
 type: 'enn'
 backbone: 'cvt'
 dataset: 'nuscenes'
-logdir: 'nuscenes/cvt_enn_nonalpha'
+logdir: 'nuscenes/cvt_enn_both'
 gpus: [0]
 batch_size: 32
 num_workers: 16

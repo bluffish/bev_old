@@ -165,6 +165,7 @@ class CrossAttention(nn.Module):
         dot = self.scale * torch.einsum('b n Q d, b n K d -> b n Q K', q, k)
         dot = rearrange(dot, 'b n Q K -> b Q (n K)')
         att = dot.softmax(dim=-1)
+        # print(att.shape)
 
         # Combine values (image level features).
         a = torch.einsum('b Q K, b K d -> b Q d', att, v)

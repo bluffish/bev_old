@@ -80,30 +80,30 @@ if __name__ == "__main__":
     cv2.imwrite("labels.jpg", labels)
     cv2.imwrite("fc.jpg", cam_img*255)
 
-    # for query_location in query_locations:
-    #     att_map = mean_att[query_location[0]][query_location[1]].detach().cpu().numpy()
-    #
-    #     pred_img = preds[0][0].detach().cpu().numpy()
-    #     plt.title('Prediction and Query')
-    #     plt.imshow(pred_img)
-    #     # Query mask
-    #     query_mask = np.zeros((H, W))
-    #     query_mask[query_location[0], query_location[1]] = 1
-    #     query_mask = cv2.resize(query_mask, dsize=(pred_img.shape[1], pred_img.shape[0]),
-    #                             interpolation=cv2.INTER_NEAREST)
-    #     plt.imshow(query_mask, alpha=query_mask)
-    #     plt.savefig("query_mask.jpg")
-    #
-    #     ova = np.unravel_index(att_map.argmax(), att_map.shape)
-    #     print(ova)
-    #     print(att_map[ova[0], ova[1], ova[2]])
-    #
-    #     for j in range(6):
-    #         cam_img = np.transpose(imgs[0][j].cpu().numpy(), (1, 2, 0))
-    #         att_map = mean_att[query_location[0]][query_location[1]][j].cpu().numpy()
-    #         plt.title(f'Cam {j}')
-    #         plt.imshow(cam_img)
-    #         # att_map *= 10
-    #         att_map_upsampled = cv2.resize(att_map, dsize=(cam_img.shape[1], cam_img.shape[0]),
-    #                                        interpolation=cv2.INTER_NEAREST)
-    #         plt.imshow(att_map_upsampled, alpha=att_map_upsampled+.5)
+    for query_location in query_locations:
+        att_map = mean_att[query_location[0]][query_location[1]].detach().cpu().numpy()
+
+        pred_img = preds[0][0].detach().cpu().numpy()
+        plt.title('Prediction and Query')
+        plt.imshow(pred_img)
+        # Query mask
+        query_mask = np.zeros((H, W))
+        query_mask[query_location[0], query_location[1]] = 1
+        query_mask = cv2.resize(query_mask, dsize=(pred_img.shape[1], pred_img.shape[0]),
+                                interpolation=cv2.INTER_NEAREST)
+        plt.imshow(query_mask, alpha=query_mask)
+        plt.savefig("query_mask.jpg")
+
+        ova = np.unravel_index(att_map.argmax(), att_map.shape)
+        print(ova)
+        print(att_map[ova[0], ova[1], ova[2]])
+
+        for j in range(6):
+            cam_img = np.transpose(imgs[0][j].cpu().numpy(), (1, 2, 0))
+            att_map = mean_att[query_location[0]][query_location[1]][j].cpu().numpy()
+            plt.title(f'Cam {j}')
+            plt.imshow(cam_img)
+            # att_map *= 10
+            att_map_upsampled = cv2.resize(att_map, dsize=(cam_img.shape[1], cam_img.shape[0]),
+                                           interpolation=cv2.INTER_NEAREST)
+            plt.imshow(att_map_upsampled, alpha=att_map_upsampled+.5)
