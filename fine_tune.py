@@ -35,7 +35,7 @@ def get_val(model, val_loader, device, loss_fn, activation, num_classes):
     c = 0
 
     with torch.no_grad():
-        for (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels, ood, ood_cam) in tqdm(val_loader):
+        for (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels, ood) in tqdm(val_loader):
             preds = model(imgs, rots, trans, intrins, extrins, post_rots, post_trans)
             uncertainty = vacuity(preds).cpu()
             labels = labels.to(device)
@@ -84,7 +84,7 @@ def train():
     device = torch.device('cpu') if len(config['gpus']) < 0 else torch.device(f'cuda:{config["gpus"][0]}')
     num_classes, classes = 4, ["vehicle", "road", "lane", "background"]
     compile_data = compile_data_carla if config['dataset'] == 'carla' else compile_data_nuscenes
-    train_loader, val_loader = compile_data("mini", config, shuffle_train=True, ood=True)
+    train_loader, val_loader = compile_data("trainval", config, shuffle_train=True, ood=True)
 
     class_proportions = {
         "nuscenes": [.015, .2, .05, .735],
@@ -129,7 +129,7 @@ def train():
     epoch = 0
 
     while True:
-        for batchi, (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels, ood, ood_cam) in enumerate(
+        for batchi, (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels, ood) in enumerate(
                 train_loader):
             t0 = time()
             opt.zero_grad(set_to_none=True)
@@ -153,10 +153,6 @@ def train():
                        plt.cm.jet(uncertainty[0][0].detach().cpu().numpy()))
             cv2.imwrite(os.path.join(config['logdir'], "ood.jpg"),
                         ood[0].cpu().numpy() * 255)
-
-            for cam_idx in range(6):
-                cv2.imwrite(os.path.join(config['logdir'], f"ood{cam_idx}.jpg"),
-                            ood_cam[0,cam_idx].cpu().numpy() * 255)
 
             if step % 10 == 0:
                 print(step, loss.item())

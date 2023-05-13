@@ -15,6 +15,7 @@ import torchvision
 
 from einops import rearrange
 
+
 class FocalLoss(nn.Module):
     def __init__(self,
                  alpha: Optional[Tensor] = None,
@@ -84,7 +85,7 @@ class UCELossReg(torch.nn.Module):
     def __init__(
         self,
         weights: Optional[Tensor] = None,
-        l = 0.00005
+        l=0.000005
     ):
         super().__init__()
 
@@ -93,15 +94,22 @@ class UCELossReg(torch.nn.Module):
         self.l = l
 
     def forward(self, alpha, y, ood):
-        A = self.loss_fn(alpha, y)
+        mask = ood.unsqueeze(0).repeat(4, 1, 1, 1).bool()
 
-        mask = ood.unsqueeze(1).repeat(1,4,1,1).bool()
+        alpha = alpha.permute(1, 0, 2, 3)
+        y = y.permute(1, 0, 2, 3)
 
-        a_m = alpha[mask].view(1, alpha.shape[1], -1)
-        pred = dist.Dirichlet(a_m)
+        alpha_masked = alpha[mask].view(4, -1)
 
-        target = dist.Dirichlet(torch.ones_like(a_m))
+        pred = dist.Dirichlet(alpha_masked)
+        target = dist.Dirichlet(torch.ones_like(alpha_masked))
+
         reg = dist.kl.kl_divergence(target, pred)
+
+        alpha = alpha[~mask].view(1, 4, -1)
+        y = y[~mask].view(1, 4, -1)
+
+        A = self.loss_fn(alpha, y)
 
         return A + torch.mean(reg) * self.l
 
@@ -136,7 +144,7 @@ class UCELossRegMap(torch.nn.Module):
     def forward(self, alpha, y, ood, ood_cam, atts):
         A = self.loss_fn(alpha, y)
 
-        mask = torch.zeros((alpha.shape[0], 25, 25))
+        mask = torch.zeros((alpha.shape[0], 25, 25)).to(ood.device)
 
         rearranged_atts = []
         for i, att in enumerate(atts):
@@ -150,29 +158,18 @@ class UCELossRegMap(torch.nn.Module):
         for i in range(alpha.shape[0]):
             for r in range(25):
                 for c in range(25):
-                    att_map = mean_att[i,r,c]
+                    att_map = mean_att[i, r, c]
                     l = att_map.argmax()
-
-                    my = l % 56
-                    l = l // 56
-                    mx = l % 120
-                    l = l // 120
-                    mc = l % 60
+                    mc, my, mx = unravel_index(l, att_map.shape)
 
                     mask[i, r, c] = ood_cam[i, mc, my, mx]
 
-        mask = torch.nn.functional.interpolate(mask.unsqueeze(0), size=(200, 200)).to(ood.device)
+        mask.requires_grad = True
+        mask = torch.nn.functional.interpolate(mask.unsqueeze(1), size=(200, 200))
         cv2.imwrite("mask.jpg", mask[0,0].detach().cpu().numpy()*255)
-        #
-        reg = self.bce(mask[0].float(), ood.float())
-        # mask = mask.unsqueeze(0).repeat(1,4,1,1)
 
-        # mask = mask.bool()
-        # a_m = alpha[mask].view(1, alpha.shape[1], -1)
-        # pred = dist.Dirichlet(a_m)
-        #
-        # target = dist.Dirichlet(torch.ones_like(a_m))
-        # reg = dist.kl.kl_divergence(target, pred)
+        reg = self.bce(mask.float(), y[:,0,:,:].float().unsqueeze(1))
+
         return reg
 
 
@@ -186,7 +183,6 @@ class UCELoss(torch.nn.Module):
         self.weights = weights
 
     def forward(self, alpha, y):
-
         S = torch.sum(alpha, dim=1, keepdim=True)
 
         B = y * (torch.digamma(S + 1e-10) - torch.digamma(alpha + 1e-10) + 1e-10)
@@ -194,7 +190,7 @@ class UCELoss(torch.nn.Module):
 
         if self.weights is not None:
             for i in range(self.weights.shape[0]):
-                B[:, i, :, :] *= self.weights[i]
+                B[:, i] *= self.weights[i]
 
         A = torch.sum(B, dim=1, keepdim=True)
 

@@ -140,8 +140,8 @@ def train():
                 cv2.imwrite(os.path.join(config['logdir'], f"cam{cam_idx}.jpg"),
                             imgs[0,cam_idx].permute(1, 2, 0).cpu().numpy() * 255)
 
-
             preds, atts = model(imgs, rots, trans, intrins, extrins, post_rots, post_trans, return_att=True)
+
             uncertainty = uncertainty_function(preds).cpu()
             labels = labels.to(device)
             ood = ood.to(device)
@@ -161,6 +161,7 @@ def train():
                        plt.cm.jet(uncertainty[0][0].detach().cpu().numpy()))
             cv2.imwrite(os.path.join(config['logdir'], "ood.jpg"),
                         ood[0].cpu().numpy() * 255)
+
             if step % 10 == 0:
                 print(step, loss.item())
 

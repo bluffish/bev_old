@@ -7,6 +7,6 @@ gpus: [0]
 batch_size: 32
 num_workers: 16
 weight_decay: 0.0000001
-learning_rate: 0.0005
-num_steps: 20000
+learning_rate: 0.001
+num_steps: 40000
 val_step: 1000

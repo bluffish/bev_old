@@ -253,8 +253,9 @@ class NuscData(torch.utils.data.Dataset):
                 id.append(rec)
 
         # sort by scene, timestamp (only to make chronological viz easier)
-        # ood.sort(key=lambda x: (x['scene_token'], x['timestamp']))
-        # id.sort(key=lambda x: (x['scene_token'], x['timestamp']))
+        ood.sort(key=lambda x: (x['scene_token'], x['timestamp']))
+        id.sort(key=lambda x: (x['scene_token'], x['timestamp']))
+
         return ood if self.ood else id
 
     def sample_augmentation(self):
@@ -290,21 +291,22 @@ class NuscData(torch.utils.data.Dataset):
 
         for cam in cams:
             samp = self.nusc.get('sample_data', rec['data'][cam])
-            ood = np.zeros((56, 120))
-            data_path, boxes, camera_intrinsic = self.nusc.get_sample_data(
-                rec['data'][cam],
-                box_vis_level=BoxVisibility.ALL)
-            for box in boxes:
-                if box.name in self.ood_labels:
-                    corners = view_points(box.corners(), camera_intrinsic, normalize=True)[:2, :]
-                    corners = np.round(corners * .3 / 4)
 
-                    corners = np.int32(corners).T
-
-                    for i in range(8):
-                        for j in range(8):
-                            cv2.fillConvexPoly(ood, corners[i:j], color=1)
-
+            # ood = np.zeros((270, 480))
+            # data_path, boxes, camera_intrinsic = self.nusc.get_sample_data(
+            #     rec['data'][cam],
+            #     box_vis_level=BoxVisibility.ANY)
+            # for box in boxes:
+            #     if box.name.split('.')[0] == 'vehicle':
+            #         corners = view_points(box.corners(), camera_intrinsic, normalize=True)[:2, :]
+            #
+            #         corners = np.int32(corners * .3).T
+            #
+            #         for i in range(8):
+            #             for j in range(8):
+            #                 cv2.fillConvexPoly(ood, corners[i:j], color=1)
+            #
+            # ood = cv2.resize(ood[46:, :], dsize=(120, 56), interpolation=cv2.INTER_NEAREST)
 
             imgname = os.path.join(self.nusc.dataroot, samp['filename'])
             img = Image.open(imgname)
@@ -347,10 +349,9 @@ class NuscData(torch.utils.data.Dataset):
             trans.append(tran)
             post_rots.append(post_rot)
             post_trans.append(post_tran)
-            oods.append(torch.tensor(ood))
 
         return (torch.stack(imgs), torch.stack(rots), torch.stack(trans),
-                torch.stack(intrins), torch.stack(extrins), torch.stack(post_rots), torch.stack(post_trans), torch.stack(oods))
+                torch.stack(intrins), torch.stack(extrins), torch.stack(post_rots), torch.stack(post_trans))
 
     def get_label(self, rec):
         egopose = self.nusc.get('ego_pose',
@@ -432,9 +433,9 @@ class NuscData(torch.utils.data.Dataset):
         rec = self.ixes[index]
 
         cams = self.choose_cams()
-        imgs, rots, trans, intrins, extrins, post_rots, post_trans, ood_cam = self.get_image_data(rec, cams)
+        imgs, rots, trans, intrins, extrins, post_rots, post_trans = self.get_image_data(rec, cams)
         label, ood = self.get_label(rec)
-        return imgs, rots, trans, intrins, extrins, post_rots, post_trans, label, ood, ood_cam
+        return imgs, rots, trans, intrins, extrins, post_rots, post_trans, label, ood
 
 
 def worker_rnd_init(x):
