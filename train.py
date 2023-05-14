@@ -50,8 +50,12 @@ def get_val(model, val_loader, device, loss_fn, activation, num_classes):
                 uncertainty = dissonance(preds).cpu()
 
             loss = loss_fn(preds, labels)
-            preds = activation(preds)
-            
+
+            try:
+                preds = activation(preds)
+            except Exception:
+                preds = activation(preds, dim=1)
+
             total_loss += loss * preds.shape[0]
             intersection, union = get_iou(preds, labels)
 
@@ -161,7 +165,11 @@ def train():
             labels = labels.to(device)
 
             loss = loss_fn(preds, labels)
-            preds = activation(preds)
+
+            try:
+                preds = activation(preds)
+            except Exception:
+                preds = activation(preds, dim=1)
 
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 5.0)

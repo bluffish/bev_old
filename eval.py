@@ -1,3 +1,5 @@
+import torch
+
 from datasets.nuscenes import compile_data as compile_data_nuscenes, denormalize_img
 from datasets.carla import compile_data as compile_data_carla
 from sklearn.manifold import TSNE
@@ -103,24 +105,30 @@ def eval(config):
         y_true = [[], [], [], []]
         y_score = [[], [], [], []]
 
-    with torch.no_grad():
-        for (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels, ood) in tqdm(train_loader):
-            preds = model(imgs, rots, trans, intrins, extrins, post_rots, post_trans)
+    m = 0
 
+    with torch.no_grad():
+        for (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels, ood) in tqdm(val_loader):
+            preds = model(imgs, rots, trans, intrins, extrins, post_rots, post_trans)
             uncertainty = uncertainty_function(preds).cpu()
-            preds = activation(preds)
+
+            m = max(m, torch.max(uncertainty))
+            try:
+                preds = activation(preds)
+            except Exception:
+                preds = activation(preds, dim=1)
 
             labels = labels.to(device)
-            plt.imsave(os.path.join(config['logdir'], "uncertainty_map.jpg"),
-                       plt.cm.jet(uncertainty[0][0]))
+            cv2.imwrite(os.path.join(config['logdir'], "uncertainty_map.jpg"),
+                       cv2.cvtColor((plt.cm.jet(uncertainty[0][0])*255).astype(np.uint8), cv2.COLOR_RGB2BGR))
             save_pred(preds, labels, config['logdir'])
 
             if is_ood:
                 mask = torch.logical_or(uncertainty[:, 0, :, :] > .5, ood.cpu() == 1).bool()
-                l = ood[mask].ravel()
-                u = uncertainty[:, 0, :, :][mask].ravel()
-                # l = ood.ravel()
-                # u = uncertainty.ravel()
+                # l = ood[mask].ravel()
+                # u = uncertainty[:, 0, :, :][mask].ravel()
+                l = ood.ravel()
+                u = uncertainty.ravel()
 
                 cv2.imwrite(os.path.join(config['logdir'], "ood.jpg"),
                            ood[0].cpu().numpy()*255)
@@ -149,10 +157,15 @@ def eval(config):
                     y_score[j] += u
 
     if is_ood:
+        print(m)
         print(sum(y_true))
         print(len(y_true))
-        pr, rec, _ = precision_recall_curve(y_true, y_score)
+        pr, rec, t = precision_recall_curve(y_true, y_score)
         fpr, tpr, _ = roc_curve(y_true, y_score)
+        print(len(t))
+        y_score_binary = [x > .5 for x in y_score]
+        print(classification_report(y_true, y_score_binary))
+        plt.ylim([0, 1.05])
 
         aupr = average_precision_score(y_true, y_score)
         auroc = roc_auc_score(y_true, y_score)
@@ -162,6 +175,7 @@ def eval(config):
         prd = PrecisionRecallDisplay(precision=pr, recall=rec)
         rcd.plot(ax=ax1, label=f"OOD\nAUROC={auroc:.3f}")
         prd.plot(ax=ax2, label=f"OOD\nAUPR={aupr:.3f}")
+        plt.scatter(rec, pr, c="red")
 
         ax1.legend()
         ax2.legend()
