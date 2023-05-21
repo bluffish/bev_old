@@ -1,6 +1,6 @@
 import torch
 
-from datasets.nuscenes import compile_data as compile_data_nuscenes, denormalize_img
+from datasets.nuscenes import compile_data as compile_data_nuscenes
 from datasets.carla import compile_data as compile_data_carla
 from sklearn.manifold import TSNE
 from sklearn.metrics import *
@@ -23,7 +23,7 @@ sns.set_context("notebook", font_scale=1.5,
                 rc={"lines.linewidth": 2.5})
 
 
-def eval(config):
+def eval(config, metrics=False, is_ood=False):
     device = torch.device('cpu') if len(config['gpus']) < 0 else torch.device(f'cuda:{config["gpus"][0]}')
     num_classes, classes = 4, ["vehicle", "road", "lane", "background"]
 
@@ -105,47 +105,50 @@ def eval(config):
         y_true = [[], [], [], []]
         y_score = [[], [], [], []]
 
-    m = 0
+    c = 0
 
     with torch.no_grad():
         for (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels, ood) in tqdm(val_loader):
+
             preds = model(imgs, rots, trans, intrins, extrins, post_rots, post_trans)
             uncertainty = uncertainty_function(preds).cpu()
 
-            m = max(m, torch.max(uncertainty))
             try:
                 preds = activation(preds)
             except Exception:
                 preds = activation(preds, dim=1)
 
             labels = labels.to(device)
+
             cv2.imwrite(os.path.join(config['logdir'], "uncertainty_map.jpg"),
                        cv2.cvtColor((plt.cm.jet(uncertainty[0][0])*255).astype(np.uint8), cv2.COLOR_RGB2BGR))
             save_pred(preds, labels, config['logdir'])
 
             if is_ood:
-                mask = torch.logical_or(uncertainty[:, 0, :, :] > .5, ood.cpu() == 1).bool()
+                mask = torch.logical_or(uncertainty[:, 0, :, :].cpu() > .5, ood.cpu() == 1).bool()
                 # l = ood[mask].ravel()
                 # u = uncertainty[:, 0, :, :][mask].ravel()
+
                 l = ood.ravel()
                 u = uncertainty.ravel()
 
-                cv2.imwrite(os.path.join(config['logdir'], "ood.jpg"),
+                cv2.imwrite(os.path.join(config['logdir'], f"ood.jpg"),
                            ood[0].cpu().numpy()*255)
+                c += 1
 
                 y_true += l.cpu()
                 y_score += u.cpu()
             else:
                 intersect, union = get_iou(preds, labels)
 
-                for j in range(0, num_classes):
-                    iou[j] += 1 if union[0] == 0 else intersect[j] / union[j] * preds.shape[0]
+                for cl in range(0, num_classes):
+                    iou[cl] += 1 if union[0] == 0 else intersect[cl] / union[cl] * preds.shape[0]
 
                 pmax = torch.argmax(preds, dim=1).cpu()
                 lmax = torch.argmax(labels, dim=1).cpu()
 
-                for j in range(num_classes):
-                    mask = torch.logical_or(pmax == j, lmax == j).bool()
+                for cl in range(num_classes):
+                    mask = torch.logical_or(pmax == cl, lmax == cl).bool()
 
                     p = pmax[mask].ravel()
                     l = lmax[mask].ravel()
@@ -153,16 +156,20 @@ def eval(config):
 
                     intersect = p != l
 
-                    y_true[j] += intersect
-                    y_score[j] += u
+                    y_true[cl] += intersect
+                    y_score[cl] += u
 
     if is_ood:
-        print(m)
-        print(sum(y_true))
-        print(len(y_true))
-        pr, rec, t = precision_recall_curve(y_true, y_score)
+        # plt.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
+
+        # plt.clf()
+        # plt.hist(y_score, bins=10, range=[0,1])
+        # plt.xlim(0, 1)
+        # plt.savefig("vacuity_histogram.png")
+        plt.clf()
+
+        pr, rec, _ = precision_recall_curve(y_true, y_score)
         fpr, tpr, _ = roc_curve(y_true, y_score)
-        print(len(t))
         y_score_binary = [x > .5 for x in y_score]
         print(classification_report(y_true, y_score_binary))
         plt.ylim([0, 1.05])
@@ -187,7 +194,7 @@ def eval(config):
         print(f"Saving combined for OOD at {save_path}\n"
               f"OOD - AUPR: {aupr} AUROC: {auroc}")
         plt.savefig(save_path)
-
+        plt.clf()
         return pr, rec, fpr, tpr, aupr, auroc
 
     else:
@@ -195,31 +202,41 @@ def eval(config):
 
         print(f'iou: {iou}')
 
-        for j in range(num_classes):
-            pr, rec, _ = precision_recall_curve(y_true[j], y_score[j])
-            fpr, tpr, _ = roc_curve(y_true[j], y_score[j])
+        if metrics:
+            auroc = []
+            aupr = []
 
-            aupr = average_precision_score(y_true[j], y_score[j])
-            auroc = roc_auc_score(y_true[j], y_score[j])
+            for cl in range(num_classes):
+                aupr.append(average_precision_score(y_true[cl], y_score[cl]))
+                auroc.append(roc_auc_score(y_true[cl], y_score[cl]))
 
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
-            rcd = RocCurveDisplay(fpr=fpr, tpr=tpr)
-            prd = PrecisionRecallDisplay(precision=pr, recall=rec)
-            rcd.plot(ax=ax1, label=f"{config['backbone']}-{config['type']}\nAUROC={auroc:.3f}")
-            prd.plot(ax=ax2, label=f"{config['backbone']}-{config['type']}\nAUPR={aupr:.3f}")
+            return aupr, auroc, iou
+        else:
+            for cl in range(num_classes):
+                pr, rec, _ = precision_recall_curve(y_true[cl], y_score[cl])
+                fpr, tpr, _ = roc_curve(y_true[cl], y_score[cl])
 
-            ax1.legend()
-            ax2.legend()
+                aupr = average_precision_score(y_true[cl], y_score[cl])
+                auroc = roc_auc_score(y_true[cl], y_score[cl])
 
-            plt.ylim([0, 1.05])
-            fig.suptitle(classes[j])
+                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+                rcd = RocCurveDisplay(fpr=fpr, tpr=tpr)
+                prd = PrecisionRecallDisplay(precision=pr, recall=rec)
+                rcd.plot(ax=ax1, label=f"{config['backbone']}-{config['type']}\nAUROC={auroc:.3f}")
+                prd.plot(ax=ax2, label=f"{config['backbone']}-{config['type']}\nAUPR={aupr:.3f}")
 
-            save_path = os.path.join(config['logdir'], f"combined_{classes[j]}.jpg")
-            print(f"Saving combined for {classes[j]} class at {save_path}\n"
-                  f"{classes[j]} CLASS - AUPR: {aupr} AUROC: {auroc}")
-            plt.savefig(save_path)
+                ax1.legend()
+                ax2.legend()
 
-            return pr, rec, fpr, tpr, aupr, auroc, iou[j]
+                plt.ylim([0, 1.05])
+                fig.suptitle(classes[cl])
+
+                save_path = os.path.join(config['logdir'], f"combined_{classes[cl]}.jpg")
+                print(f"Saving combined for {classes[cl]} class at {save_path}\n"
+                      f"{classes[cl]} CLASS - AUPR: {aupr} AUROC: {auroc}")
+                plt.savefig(save_path)
+
+                return pr, rec, fpr, tpr, aupr, auroc, iou[cl]
 
 
 if __name__ == "__main__":
@@ -251,4 +268,4 @@ if __name__ == "__main__":
     if args.logdir is not None:
         config['logdir'] = args.logdir
 
-    eval(config)
+    eval(config, is_ood=is_ood, metrics=False)

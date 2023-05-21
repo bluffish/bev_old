@@ -128,11 +128,29 @@ def unravel_index(indices, shape):
     return tuple(reversed(unraveled_indices))
 
 
+def kl_divergence(alpha, num_classes, device=None):
+    ones = torch.ones_like(alpha, dtype=torch.float32, device=device)
+    sum_alpha = torch.sum(alpha, dim=1, keepdim=True)
+    first_term = (
+        torch.lgamma(sum_alpha)
+        - torch.lgamma(alpha).sum(dim=1, keepdim=True)
+        + torch.lgamma(ones).sum(dim=1, keepdim=True)
+        - torch.lgamma(ones.sum(dim=1, keepdim=True))
+    )
+    second_term = (
+        (alpha - ones)
+        .mul(torch.digamma(alpha) - torch.digamma(sum_alpha))
+        .sum(dim=1, keepdim=True)
+    )
+    kl = first_term + second_term
+    return kl
+
+
 class UCELossRegMap(torch.nn.Module):
     def __init__(
         self,
         weights: Optional[Tensor] = None,
-        l=0.00005
+        l=0.0001
     ):
         super().__init__()
 
@@ -182,7 +200,7 @@ class UCELoss(torch.nn.Module):
 
         self.weights = weights
 
-    def forward(self, alpha, y):
+    def forward(self, alpha, y, epoch_num):
         S = torch.sum(alpha, dim=1, keepdim=True)
 
         B = y * (torch.digamma(S + 1e-10) - torch.digamma(alpha + 1e-10) + 1e-10)
@@ -194,7 +212,15 @@ class UCELoss(torch.nn.Module):
 
         A = torch.sum(B, dim=1, keepdim=True)
 
-        return A.mean()
+        annealing_coef = torch.min(
+            torch.tensor(1.0, dtype=torch.float32),
+            torch.tensor(epoch_num / 10, dtype=torch.float32),
+        )
+
+        kl_alpha = (alpha - 1) * (1 - y) + 1
+        kl_div = annealing_coef * kl_divergence(kl_alpha, 4, device=alpha.device)
+
+        return (A + kl_div).mean()
 
 
 class FocalUCELoss(torch.nn.Module):

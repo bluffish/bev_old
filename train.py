@@ -18,6 +18,7 @@ import warnings
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 torch.backends.cudnn.enabled = False
+
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 
 torch.multiprocessing.set_sharing_strategy('file_system')
@@ -49,12 +50,12 @@ def get_val(model, val_loader, device, loss_fn, activation, num_classes):
             if config['type'] == 'enn' or config['type'] == 'postnet':
                 uncertainty = dissonance(preds).cpu()
 
-            loss = loss_fn(preds, labels)
-
             try:
                 preds = activation(preds)
+                loss = loss_fn(preds, labels, 10)
             except Exception:
                 preds = activation(preds, dim=1)
+                loss = loss_fn(preds, labels)
 
             total_loss += loss * preds.shape[0]
             intersection, union = get_iou(preds, labels)
@@ -164,12 +165,12 @@ def train():
             preds = model(imgs, rots, trans, intrins, extrins, post_rots, post_trans)
             labels = labels.to(device)
 
-            loss = loss_fn(preds, labels)
-
             try:
                 preds = activation(preds)
+                loss = loss_fn(preds, labels, epoch)
             except Exception:
                 preds = activation(preds, dim=1)
+                loss = loss_fn(preds, labels)
 
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 5.0)
@@ -243,6 +244,7 @@ if __name__ == "__main__":
 
     parser.add_argument("config")
     parser.add_argument('-g', '--gpus', nargs='+', required=False)
+    parser.add_argument('-l', '--logdir', required=False)
 
     args = parser.parse_args()
 
@@ -253,5 +255,7 @@ if __name__ == "__main__":
 
     if args.gpus is not None:
         config['gpus'] = [int(i) for i in args.gpus]
+    if args.logdir is not None:
+        config['logdir'] = args.logdir
 
     train()

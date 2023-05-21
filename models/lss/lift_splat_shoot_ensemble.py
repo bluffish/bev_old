@@ -8,10 +8,10 @@ class LiftSplatShootEnsemble(nn.Module):
         num_models = 5
         self.models = nn.ModuleList([LiftSplatShoot(outC=outC) for _ in range(num_models)])
 
-    def forward(self, x, rots, trans, intrins, post_rots, post_trans):
+    def forward(self, x, rots, trans, intrins, extrins, post_rots, post_trans):
         outputs = []
 
         for model in self.models:
-            outputs.append(model(x, rots, trans, intrins, post_rots, post_trans))
+            outputs.append(model(x, rots, trans, intrins, extrins, post_rots, post_trans))
 
         return torch.mean(torch.stack(outputs), dim=0)

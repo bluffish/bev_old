@@ -1,7 +1,7 @@
 type: 'enn'
 backbone: 'lss'
 dataset: 'nuscenes'
-logdir: 'nuscenes/lss_enn_mini'
+logdir: 'nuscenes/lss_enn'
 gpus: [4]
 batch_size: 32
 num_workers: 16

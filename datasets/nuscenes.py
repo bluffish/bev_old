@@ -148,10 +148,13 @@ class NuscData(torch.utils.data.Dataset):
                      'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT'],
             'Ncams': ncams,
         }
+
         self.ood_classes_train = ['vehicle.bus.rigid', "vehicle.bus.bendy"]
         self.ood_classes_val = ['vehicle.construction']
+        # self.ood_classes_train = ["static_object.bicycle_rack"]
+        self.ood_classes_val = []
 
-        self.all_ood = ['vehicle.construction', 'vehicle.bus.rigid', "vehicle.bus.bendy"]
+        self.all_ood = self.ood_classes_train + self.ood_classes_val
 
         if is_train:
             self.ood_labels = self.ood_classes_train
@@ -237,10 +240,22 @@ class NuscData(torch.utils.data.Dataset):
         id = []
 
         for rec in samples:
+            if self.ood and len(ood) >= 64:
+                break
+
+            ego_pose = self.nusc.get('ego_pose', rec['data']['LIDAR_TOP'])
+
+            ego_coord = ego_pose['translation']
+
             c = False
 
             for tok in rec['anns']:
                 inst = self.nusc.get('sample_annotation', tok)
+
+                box_coord = inst['translation']
+
+                if max(abs(ego_coord[0] - box_coord[0]), abs(ego_coord[1] - box_coord[1])) > 100 or int(inst['visibility_token']) <= 2:
+                    continue
 
                 if inst['category_name'] in self.ood_labels:
                     ood.append(rec)

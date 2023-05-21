@@ -84,7 +84,7 @@ def train():
     device = torch.device('cpu') if len(config['gpus']) < 0 else torch.device(f'cuda:{config["gpus"][0]}')
     num_classes, classes = 4, ["vehicle", "road", "lane", "background"]
     compile_data = compile_data_carla if config['dataset'] == 'carla' else compile_data_nuscenes
-    train_loader, val_loader = compile_data("trainval", config, shuffle_train=True, ood=True)
+    train_loader, val_loader = compile_data("mini", config, shuffle_train=True, ood=True)
 
     class_proportions = {
         "nuscenes": [.015, .2, .05, .735],
@@ -130,7 +130,7 @@ def train():
 
     while True:
         for batchi, (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels, ood) in enumerate(
-                train_loader):
+                val_loader):
             t0 = time()
             opt.zero_grad(set_to_none=True)
 

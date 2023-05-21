@@ -120,6 +120,8 @@ class CarlaDataset(torch.utils.data.Dataset):
         post_trans = []
 
         label_r = Image.open(os.path.join(agent_path + "birds_view_semantic_camera", str(idx) + '.png'))
+        # label_r.save("label.jpg")
+
         label = np.array(label_r)
         label_r.close()
 
@@ -128,17 +130,15 @@ class CarlaDataset(torch.utils.data.Dataset):
         road = mask(label, (128, 64, 128))
         lane = mask(label, (157, 234, 50))
         vehicles = mask(label, (0, 0, 142))
-        ood = torch.tensor(mask(label, (0,0,0)))
+        # ood = torch.tensor(mask(label, (0,0,0)))
+        ood = torch.tensor(mask(label, (0, 0, 142)))
 
         empty[vehicles == 1] = 0
         empty[road == 1] = 0
         empty[lane == 1] = 0
         label = np.stack((vehicles, road, lane, empty))
 
-        if self.ood:
-            label = ood
-        else:
-            label = torch.tensor(label)
+        label = torch.tensor(label)
 
         for sensor_name, sensor_info in self.sensors_info['sensors'].items():
             if sensor_info["sensor_type"] == "sensor.camera.rgb" and sensor_name != "birds_view_camera":
@@ -213,7 +213,7 @@ class CarlaDataset(torch.utils.data.Dataset):
         return (torch.stack(imgs).float(),
                 torch.stack(rots).float(), torch.stack(trans).float(),
                 torch.stack(intrins).float(),  torch.zeros((1,1)), torch.stack(post_rots).float(), torch.stack(post_trans).float(),
-                label.float())
+                label.float(), ood.float())
 
     def sample_augmentation(self):
         H, W = self.H, self.W
@@ -248,12 +248,15 @@ def compile_data(version, config, ood=False, augment_train=False, shuffle_train=
     train_dataset = CarlaDataset(os.path.join(dataroot, "train/"))
 
     if ood:
-        val_dataset = CarlaDataset(os.path.join(dataroot, "val_ood/"), ood=ood)
+        val_dataset = CarlaDataset(os.path.join(dataroot, "val_ood_old/"), ood=ood)
     else:
         val_dataset = CarlaDataset(os.path.join(dataroot, "val/"), ood=ood)
 
+    train_dataset.length = 10000
+    val_dataset.length = 1000
+
     if version == "mini":
-        train_dataset.length = 128
+        train_dataset.length = 256
         val_dataset.length = 128
 
     train_loader = torch.utils.data.DataLoader(train_dataset,

@@ -1,0 +1,9 @@
+type: 'dropout'
+backbone: 'lss'
+dataset: 'carla'
+logdir: './images'
+gpus: [0]
+batch_size: 8
+num_workers: 16
+model_path: 'carla/dropout_ce/model67000.pt'
+tsne: false
