@@ -66,13 +66,13 @@ class BevEncodeGPN(nn.Module):
         beta = beta.reshape(-1, 200, 200, self.outC).permute(0, 3, 1, 2).contiguous()
 
         if self.last is not None:
-            beta = self.last(beta.log()).exp()
-        alpha = beta + 1
+            beta = self.last(beta)
+        alpha = beta.relu() + 1
 
         if self.tsne:
             return x_b
         else:
-            return alpha.clamp(min=1e-4)
+            return alpha
 
 
 class LiftSplatShootGPN(LiftSplatShoot):

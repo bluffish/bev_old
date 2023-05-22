@@ -252,12 +252,9 @@ def compile_data(version, config, ood=False, augment_train=False, shuffle_train=
     else:
         val_dataset = CarlaDataset(os.path.join(dataroot, "val/"), ood=ood)
 
-    train_dataset.length = 10000
-    val_dataset.length = 1000
-
     if version == "mini":
         train_dataset.length = 256
-        val_dataset.length = 128
+        val_dataset.length = 32
 
     train_loader = torch.utils.data.DataLoader(train_dataset,
                                                batch_size=config['batch_size'],

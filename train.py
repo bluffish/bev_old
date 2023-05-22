@@ -103,7 +103,7 @@ def train():
     num_classes, classes = 4, ["vehicle", "road", "lane", "background"]
 
     compile_data = compile_data_carla if config['dataset'] == 'carla' else compile_data_nuscenes
-    train_loader, val_loader = compile_data("trainval", config, shuffle_train=True)
+    train_loader, val_loader = compile_data("mini", config, shuffle_train=True)
 
     class_proportions = {
         "nuscenes": [.015, .2, .05, .735],
@@ -154,7 +154,7 @@ def train():
     best_aupr = 0.0
 
     step = 0
-    epoch = 0
+    epoch = 1
 
     while True:
         for batchi, (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels, ood) in enumerate(
@@ -166,11 +166,11 @@ def train():
             labels = labels.to(device)
 
             try:
-                preds = activation(preds)
                 loss = loss_fn(preds, labels, epoch)
+                preds = activation(preds)
             except Exception:
-                preds = activation(preds, dim=1)
                 loss = loss_fn(preds, labels)
+                preds = activation(preds, dim=1)
 
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 5.0)
@@ -245,6 +245,7 @@ if __name__ == "__main__":
     parser.add_argument("config")
     parser.add_argument('-g', '--gpus', nargs='+', required=False)
     parser.add_argument('-l', '--logdir', required=False)
+    parser.add_argument('-b', '--batch_size', required=False)
 
     args = parser.parse_args()
 
@@ -257,5 +258,7 @@ if __name__ == "__main__":
         config['gpus'] = [int(i) for i in args.gpus]
     if args.logdir is not None:
         config['logdir'] = args.logdir
+    if args.batch_size is not None:
+        config['batch_size'] = int(args.batch_size)
 
     train()

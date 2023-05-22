@@ -162,21 +162,24 @@ def eval(config, metrics=False, is_ood=False):
     if is_ood:
         # plt.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
 
+        # np.save("y_true.npy", np.array(y_true))
+        # np.save("y_score.npy", np.array(y_score))
+
         # plt.clf()
         # plt.hist(y_score, bins=10, range=[0,1])
         # plt.xlim(0, 1)
         # plt.savefig("vacuity_histogram.png")
-        plt.clf()
+        # plt.clf()
 
         pr, rec, _ = precision_recall_curve(y_true, y_score)
         fpr, tpr, _ = roc_curve(y_true, y_score)
-        y_score_binary = [x > .5 for x in y_score]
-        print(classification_report(y_true, y_score_binary))
-        plt.ylim([0, 1.05])
-
         aupr = average_precision_score(y_true, y_score)
         auroc = roc_auc_score(y_true, y_score)
 
+        # y_score_binary = [x > .5 for x in y_score]
+        # print(confusion_matrix(y_true, y_score_binary))
+        # print(classification_report(y_true, y_score_binary))
+        plt.ylim([0, 1.05])
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
         rcd = RocCurveDisplay(fpr=fpr, tpr=tpr)
         prd = PrecisionRecallDisplay(precision=pr, recall=rec)
@@ -186,7 +189,7 @@ def eval(config, metrics=False, is_ood=False):
 
         ax1.legend()
         ax2.legend()
-
+        
         plt.ylim([0, 1.05])
         fig.suptitle("OOD")
 
@@ -195,8 +198,7 @@ def eval(config, metrics=False, is_ood=False):
               f"OOD - AUPR: {aupr} AUROC: {auroc}")
         plt.savefig(save_path)
         plt.clf()
-        return pr, rec, fpr, tpr, aupr, auroc
-
+        # return pr, rec, fpr, tpr, aupr, auroc, 0
     else:
         iou = [i / len(val_loader.dataset) for i in iou]
 
@@ -212,31 +214,32 @@ def eval(config, metrics=False, is_ood=False):
 
             return aupr, auroc, iou
         else:
-            for cl in range(num_classes):
-                pr, rec, _ = precision_recall_curve(y_true[cl], y_score[cl])
-                fpr, tpr, _ = roc_curve(y_true[cl], y_score[cl])
+            # for cl in range(num_classes):
+            cl = 1
+            pr, rec, _ = precision_recall_curve(y_true[cl], y_score[cl])
+            fpr, tpr, _ = roc_curve(y_true[cl], y_score[cl])
 
-                aupr = average_precision_score(y_true[cl], y_score[cl])
-                auroc = roc_auc_score(y_true[cl], y_score[cl])
+            aupr = average_precision_score(y_true[cl], y_score[cl])
+            auroc = roc_auc_score(y_true[cl], y_score[cl])
 
-                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
-                rcd = RocCurveDisplay(fpr=fpr, tpr=tpr)
-                prd = PrecisionRecallDisplay(precision=pr, recall=rec)
-                rcd.plot(ax=ax1, label=f"{config['backbone']}-{config['type']}\nAUROC={auroc:.3f}")
-                prd.plot(ax=ax2, label=f"{config['backbone']}-{config['type']}\nAUPR={aupr:.3f}")
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+            rcd = RocCurveDisplay(fpr=fpr, tpr=tpr)
+            prd = PrecisionRecallDisplay(precision=pr, recall=rec)
+            rcd.plot(ax=ax1, label=f"{config['backbone']}-{config['type']}\nAUROC={auroc:.3f}")
+            prd.plot(ax=ax2, label=f"{config['backbone']}-{config['type']}\nAUPR={aupr:.3f}")
 
-                ax1.legend()
-                ax2.legend()
+            ax1.legend()
+            ax2.legend()
 
-                plt.ylim([0, 1.05])
-                fig.suptitle(classes[cl])
+            plt.ylim([0, 1.05])
+            fig.suptitle(classes[cl])
 
-                save_path = os.path.join(config['logdir'], f"combined_{classes[cl]}.jpg")
-                print(f"Saving combined for {classes[cl]} class at {save_path}\n"
-                      f"{classes[cl]} CLASS - AUPR: {aupr} AUROC: {auroc}")
-                plt.savefig(save_path)
+            save_path = os.path.join(config['logdir'], f"combined_{classes[cl]}.jpg")
+            print(f"Saving combined for {classes[cl]} class at {save_path}\n"
+                  f"{classes[cl]} CLASS - AUPR: {aupr} AUROC: {auroc}")
+            plt.savefig(save_path)
 
-                return pr, rec, fpr, tpr, aupr, auroc, iou[cl]
+            return pr, rec, fpr, tpr, aupr, auroc, iou[cl]
 
 
 if __name__ == "__main__":

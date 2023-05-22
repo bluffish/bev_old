@@ -12,22 +12,29 @@ def graph():
     configs = ["./configs/eval_carla_lss_baseline.yaml",
                "./configs/eval_carla_lss_enn.yaml",
                "./configs/eval_carla_lss_postnet.yaml",
-               "./configs/eval_carla_lss_ensemble.yaml",
+               # "./configs/eval_carla_lss_ensemble.yaml",
                "./configs/eval_carla_lss_dropout.yaml"]
 
-    # paths = ["./carla/lss_baseline/model7000.pt",
-    #          "./carla/lss_enn/model1000.pt",
-    #          "./carla/lss_postnet/model1000.pt",
-    #          "./carla/lss_ensemble/model9000.pt",
-    #          "./carla/lss_dropout/model3000.pt",
-    #          "./carla/lss_dropout/model3000.pt"]
+    # paths = ["./carla_small/lss_baseline/model7000.pt",
+    #          "./carla_small/lss_enn/model1000.pt",
+    #          "./carla_small/lss_postnet/model1000.pt",
+    #          "./carla_small/lss_ensemble/model9000.pt",
+    #          "./carla_small/lss_dropout/model3000.pt",
+    #          "./carla_small/lss_dropout/model3000.pt"]
 
-    paths = ["./carla/lss_baseline/best_auroc.pt",
-             "./carla/lss_enn/best_auroc.pt",
-             "./carla/lss_postnet/best_auroc.pt",
-             "./carla/lss_ensemble/best_auroc.pt",
-             "./carla/lss_dropout/best_auroc.pt",
-             "./carla/lss_dropout/best_auroc.pt"]
+    # paths = [
+    #     "outputs/carla/baseline_ce/model58000.pt",
+    #     "outputs/carla/enn_uce/model106000.pt",
+    #     "outputs/carla/postnet_uce_cnn/model69000.pt",
+    #     "outputs/carla/ensemble_ce/model53000.pt",
+    #     "outputs/carla/dropout_ce/model67000.pt",
+    # ]
+
+    paths = ["./carla/lss_baseline/best_iou.pt",
+             "./carla/lss_enn/best_iou.pt",
+             "./carla/lss_postnet/best_iou.pt",
+             # "./carla/lss_ensemble/best_auroc.pt",
+             "./carla/lss_dropout/best_iou.pt"]
 
 
     for i in range(len(configs)):
@@ -36,7 +43,7 @@ def graph():
 
         config['model_path'] = paths[i]
 
-        pr, rec, fpr, tpr, aupr, auroc, iou = eval(config)
+        pr, rec, fpr, tpr, aupr, auroc, iou = eval(config, is_ood=True)
 
         ax1.plot(fpr, tpr, label=f"{config['backbone']}_{config['type']}\nAUROC={auroc:.3f}")
         ax2.plot(rec, pr, label=f"{config['backbone']}_{config['type']}\nAUPR={aupr:.3f}")

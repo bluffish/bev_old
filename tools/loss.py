@@ -128,24 +128,6 @@ def unravel_index(indices, shape):
     return tuple(reversed(unraveled_indices))
 
 
-def kl_divergence(alpha, num_classes, device=None):
-    ones = torch.ones_like(alpha, dtype=torch.float32, device=device)
-    sum_alpha = torch.sum(alpha, dim=1, keepdim=True)
-    first_term = (
-        torch.lgamma(sum_alpha)
-        - torch.lgamma(alpha).sum(dim=1, keepdim=True)
-        + torch.lgamma(ones).sum(dim=1, keepdim=True)
-        - torch.lgamma(ones.sum(dim=1, keepdim=True))
-    )
-    second_term = (
-        (alpha - ones)
-        .mul(torch.digamma(alpha) - torch.digamma(sum_alpha))
-        .sum(dim=1, keepdim=True)
-    )
-    kl = first_term + second_term
-    return kl
-
-
 class UCELossRegMap(torch.nn.Module):
     def __init__(
         self,
@@ -191,6 +173,24 @@ class UCELossRegMap(torch.nn.Module):
         return reg
 
 
+def kl_divergence(alpha, num_classes, device=None):
+    ones = torch.ones([1, num_classes], dtype=torch.float32, device=device)
+    sum_alpha = torch.sum(alpha, dim=1, keepdim=True)
+    first_term = (
+        torch.lgamma(sum_alpha)
+        - torch.lgamma(alpha).sum(dim=1, keepdim=True)
+        + torch.lgamma(ones).sum(dim=1, keepdim=True)
+        - torch.lgamma(ones.sum(dim=1, keepdim=True))
+    )
+    second_term = (
+        (alpha - ones)
+        .mul(torch.digamma(alpha) - torch.digamma(sum_alpha))
+        .sum(dim=1, keepdim=True)
+    )
+    kl = first_term + second_term
+    return kl
+
+
 class UCELoss(torch.nn.Module):
     def __init__(
         self,
@@ -201,6 +201,9 @@ class UCELoss(torch.nn.Module):
         self.weights = weights
 
     def forward(self, alpha, y, epoch_num):
+        alpha = alpha.permute(0, 2, 3, 1).reshape(-1, 4)
+        y = y.permute(0, 2, 3, 1).reshape(-1, 4)
+
         S = torch.sum(alpha, dim=1, keepdim=True)
 
         B = y * (torch.digamma(S + 1e-10) - torch.digamma(alpha + 1e-10) + 1e-10)
@@ -219,6 +222,7 @@ class UCELoss(torch.nn.Module):
 
         kl_alpha = (alpha - 1) * (1 - y) + 1
         kl_div = annealing_coef * kl_divergence(kl_alpha, 4, device=alpha.device)
+        # print(kl_div.isnan().any())  + 1e-10
 
         return (A + kl_div).mean()
 
