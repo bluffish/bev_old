@@ -37,7 +37,7 @@ def get_val(model, val_loader, device, loss_fn, activation, num_classes):
     c = 0
 
     if config['type'] == 'dropout':
-        model.module.tests = 20
+        model.module.tests = 10
         model.module.train()
 
     with torch.no_grad():
@@ -82,6 +82,10 @@ def get_val(model, val_loader, device, loss_fn, activation, num_classes):
                 y_score_m += u
 
                 c += preds.shape[0]
+            else:
+                if config['type'] == 'dropout':
+                    model.module.tests = -1
+                    model.module.eval()
 
     iou = [i / len(val_loader.dataset) for i in iou]
 
@@ -103,7 +107,7 @@ def train():
     num_classes, classes = 4, ["vehicle", "road", "lane", "background"]
 
     compile_data = compile_data_carla if config['dataset'] == 'carla' else compile_data_nuscenes
-    train_loader, val_loader = compile_data("mini", config, shuffle_train=True)
+    train_loader, val_loader = compile_data("trainval", config, shuffle_train=True)
 
     class_proportions = {
         "nuscenes": [.015, .2, .05, .735],

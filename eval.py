@@ -101,6 +101,8 @@ def eval(config, metrics=False, is_ood=False):
     if is_ood:
         y_true = []
         y_score = []
+        alpha = []
+        target = []
     else:
         y_true = [[], [], [], []]
         y_score = [[], [], [], []]
@@ -162,8 +164,10 @@ def eval(config, metrics=False, is_ood=False):
     if is_ood:
         # plt.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
 
-        # np.save("y_true.npy", np.array(y_true))
-        # np.save("y_score.npy", np.array(y_score))
+        # torch.save(torch.tensor(y_true), "y_true.pt")
+        # torch.save(torch.tensor(y_score), "y_score.pt")
+        # torch.save(torch.tensor(alpha), "alpha.pt")
+        # torch.save(torch.tensor(target), "target.pt")
 
         # plt.clf()
         # plt.hist(y_score, bins=10, range=[0,1])
@@ -189,7 +193,7 @@ def eval(config, metrics=False, is_ood=False):
 
         ax1.legend()
         ax2.legend()
-        
+
         plt.ylim([0, 1.05])
         fig.suptitle("OOD")
 

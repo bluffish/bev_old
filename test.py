@@ -1,8 +1,15 @@
+import numpy as np
 import torch
+from tools.uncertainty import activate_uce
+from tools.utils import save_pred
+import einops
 
+alpha = torch.load("alpha.pt")
+alpha = alpha.view(4, -1)
+alpha = alpha[0]
+alpha = alpha.view(8, 4, 200, 200)
+print(alpha.shape)
 
-alpha = torch.randn((1, 4, 3, 3))
+pred = activate_uce(alpha)
 
-print(alpha)
-
-print(alpha.permute(0, 2, 3, 1).view(-1, 4))
+p, l = save_pred(pred, pred, './')
