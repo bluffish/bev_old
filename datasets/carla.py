@@ -254,7 +254,7 @@ def compile_data(version, config, ood=False, augment_train=False, shuffle_train=
 
     if version == "mini":
         train_dataset.length = 256
-        val_dataset.length = 32
+        val_dataset.length = 128
 
     train_loader = torch.utils.data.DataLoader(train_dataset,
                                                batch_size=config['batch_size'],

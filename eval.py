@@ -101,13 +101,12 @@ def eval(config, metrics=False, is_ood=False):
     if is_ood:
         y_true = []
         y_score = []
-        alpha = []
-        target = []
     else:
         y_true = [[], [], [], []]
         y_score = [[], [], [], []]
 
-    c = 0
+        y_true_a = []
+        y_score_a = []
 
     with torch.no_grad():
         for (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels, ood) in tqdm(val_loader):
@@ -127,16 +126,11 @@ def eval(config, metrics=False, is_ood=False):
             save_pred(preds, labels, config['logdir'])
 
             if is_ood:
-                mask = torch.logical_or(uncertainty[:, 0, :, :].cpu() > .5, ood.cpu() == 1).bool()
-                # l = ood[mask].ravel()
-                # u = uncertainty[:, 0, :, :][mask].ravel()
-
                 l = ood.ravel()
                 u = uncertainty.ravel()
 
                 cv2.imwrite(os.path.join(config['logdir'], f"ood.jpg"),
                            ood[0].cpu().numpy()*255)
-                c += 1
 
                 y_true += l.cpu()
                 y_score += u.cpu()
@@ -163,11 +157,6 @@ def eval(config, metrics=False, is_ood=False):
 
     if is_ood:
         # plt.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
-
-        # torch.save(torch.tensor(y_true), "y_true.pt")
-        # torch.save(torch.tensor(y_score), "y_score.pt")
-        # torch.save(torch.tensor(alpha), "alpha.pt")
-        # torch.save(torch.tensor(target), "target.pt")
 
         # plt.clf()
         # plt.hist(y_score, bins=10, range=[0,1])
@@ -219,7 +208,7 @@ def eval(config, metrics=False, is_ood=False):
             return aupr, auroc, iou
         else:
             # for cl in range(num_classes):
-            cl = 1
+            cl = 0
             pr, rec, _ = precision_recall_curve(y_true[cl], y_score[cl])
             fpr, tpr, _ = roc_curve(y_true[cl], y_score[cl])
 
@@ -229,6 +218,7 @@ def eval(config, metrics=False, is_ood=False):
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
             rcd = RocCurveDisplay(fpr=fpr, tpr=tpr)
             prd = PrecisionRecallDisplay(precision=pr, recall=rec)
+
             rcd.plot(ax=ax1, label=f"{config['backbone']}-{config['type']}\nAUROC={auroc:.3f}")
             prd.plot(ax=ax2, label=f"{config['backbone']}-{config['type']}\nAUPR={aupr:.3f}")
 

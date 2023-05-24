@@ -1,5 +1,3 @@
-from time import time
-
 from sklearn.metrics import roc_auc_score, average_precision_score
 from tensorboardX import SummaryWriter
 
@@ -45,17 +43,14 @@ def get_val(model, val_loader, device, loss_fn, activation, num_classes):
             preds = model(imgs, rots, trans, intrins, extrins, post_rots, post_trans)
             labels = labels.to(device)
 
-            if config['type'] == 'baseline' or config['type'] == 'dropout' or config['type'] == 'ensemble':
-                uncertainty = entropy(preds).cpu()
             if config['type'] == 'enn' or config['type'] == 'postnet':
                 uncertainty = dissonance(preds).cpu()
-
-            try:
-                preds = activation(preds)
                 loss = loss_fn(preds, labels, 10)
-            except Exception:
-                preds = activation(preds, dim=1)
+                preds = activation(preds)
+            else:
+                uncertainty = entropy(preds).cpu()
                 loss = loss_fn(preds, labels)
+                preds = activation(preds, dim=1)
 
             total_loss += loss * preds.shape[0]
             intersection, union = get_iou(preds, labels)
@@ -169,15 +164,15 @@ def train():
             preds = model(imgs, rots, trans, intrins, extrins, post_rots, post_trans)
             labels = labels.to(device)
 
-            try:
+            if config['type'] == 'enn' or config['type'] == 'postnet':
                 loss = loss_fn(preds, labels, epoch)
                 preds = activation(preds)
-            except Exception:
+            else:
                 loss = loss_fn(preds, labels)
                 preds = activation(preds, dim=1)
 
             loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+            # nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             opt.step()
 
             step += 1
@@ -205,7 +200,6 @@ def train():
                 writer.add_scalar('train/epoch', epoch, step)
 
             if step % config['val_step'] == 0:
-
                 model.eval()
                 print("Running EVAL...")
                 val_loss, val_iou, auroc, aupr = get_val(model, val_loader, device, loss_fn, activation, num_classes)

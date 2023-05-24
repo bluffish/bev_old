@@ -315,12 +315,15 @@ class LiftSplatShootENN(LiftSplatShoot):
             outC=4
     ):
         super(LiftSplatShootENN, self).__init__(
-            x_bound=[-50.0, 50.0, 0.5],
-            y_bound=[-50.0, 50.0, 0.5],
-            z_bound=[-10.0, 10.0, 20.0],
-            d_bound=[4.0, 45.0, 1.0],
-            final_dim=(128, 352),
-            outC=4)
+            x_bound=x_bound,
+            y_bound=y_bound,
+            z_bound=z_bound,
+            d_bound=d_bound,
+            final_dim=final_dim,
+            outC=outC)
 
     def forward(self, x, rots, trans, intrins, extrins, post_rots, post_trans):
-        return super().forward(x, rots, trans, intrins, extrins, post_rots, post_trans).relu() + 1
+        logits = super().forward(x, rots, trans, intrins, extrins, post_rots, post_trans)
+        alpha = logits.relu() + 1
+
+        return alpha

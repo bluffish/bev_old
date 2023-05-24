@@ -45,50 +45,27 @@ backbones = {
 
 
 def get_model(type, backbone, num_classes, device):
+    weights = torch.tensor([3.0, 1.0, 2.0, 1.0]).to(device)
+
     if type == 'baseline':
         activation = torch.softmax
-
-        if backbone == 'cvt':
-            loss_fn = FocalLoss(gamma=2, alpha=torch.tensor([3.0, 1.0, 2.0, 1.0])).cuda(device)
-        else:
-            loss_fn = torch.nn.CrossEntropyLoss(weight=torch.tensor([3.0, 1.0, 2.0, 1.0])).cuda(device)
-
+        loss_fn = torch.nn.CrossEntropyLoss(weight=weights).cuda(device)
         model = backbones[backbone][0](outC=num_classes)
     elif type == 'enn':
         activation = activate_uce
-
-        if backbone == 'cvt':
-            loss_fn = UCELoss(weights=torch.tensor([3.0, 1.0, 2.0, 1.0])).cuda(device)
-        else:
-            loss_fn = UCELoss(weights=torch.tensor([3.0, 1.0, 2.0, 1.0])).cuda(device)
-
+        loss_fn = UCELoss(weights=weights).cuda(device)
         model = backbones[backbone][1](outC=num_classes)
     elif type == 'postnet':
         activation = activate_uce
-
-        if backbone == 'cvt':
-            loss_fn = UCELoss(weights=torch.tensor([3.0, 1.0, 2.0, 1.0])).cuda(device)
-        else:
-            loss_fn = UCELoss(weights=torch.tensor([3.0, 1.0, 2.0, 1.0])).cuda(device)
-
+        loss_fn = UCELoss(weights=weights).cuda(device)
         model = backbones[backbone][2](outC=num_classes)
     elif type == 'dropout':
         activation = torch.softmax
-
-        if backbone == 'cvt':
-            loss_fn = FocalLoss(gamma=2, alpha=torch.tensor([3.0, 1.0, 2.0, 1.0])).cuda(device)
-        else:
-            loss_fn = torch.nn.CrossEntropyLoss(weight=torch.tensor([3.0, 1.0, 2.0, 1.0])).cuda(device)
-
+        loss_fn = torch.nn.CrossEntropyLoss(weight=weights).cuda(device)
         model = backbones[backbone][3](outC=num_classes)
     elif type == 'ensemble':
         activation = torch.softmax
-
-        if backbone == 'cvt':
-            loss_fn = FocalLoss(gamma=2, alpha=torch.tensor([3.0, 1.0, 2.0, 1.0])).cuda(device)
-        else:
-            loss_fn = torch.nn.CrossEntropyLoss(weight=torch.tensor([3.0, 1.0, 2.0, 1.0])).cuda(device)
-
+        loss_fn = torch.nn.CrossEntropyLoss(weight=weights).cuda(device)
         model = backbones[backbone][4](outC=num_classes)
     else:
         raise ValueError("Please pick a valid model type.")
