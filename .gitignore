@@ -6,5 +6,8 @@ carla/
 test/
 pretrained/
 outputs/
+pts/
+test/
+carla_old/
 
 *.pt
