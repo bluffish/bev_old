@@ -47,7 +47,7 @@ class UCELoss(torch.nn.Module):
         )
 
         kl_alpha = (alpha - 1) * (1 - y) + 1
-        kl_div = annealing_coef * 15 * kl_divergence(kl_alpha, self.num_classes, device=alpha.device)
+        kl_div = annealing_coef * kl_divergence(kl_alpha, self.num_classes, device=alpha.device)
 
         return (A + kl_div).mean()
 

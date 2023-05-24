@@ -102,13 +102,15 @@ class CarlaDataset(torch.utils.data.Dataset):
         self.rand_flip = rand_flip
         self.is_train = is_train
 
+        self.offset = 0
+
     def __len__(self):
         return self.length
 
     def __getitem__(self, idx):
         agent_number = math.floor(idx / self.ticks)
         agent_path = os.path.join(self.data_path, f"agents/{agent_number}/")
-        idx = idx % self.ticks
+        idx = (idx + self.offset) % self.ticks
 
         imgs = []
         img_segs = []
@@ -120,8 +122,6 @@ class CarlaDataset(torch.utils.data.Dataset):
         post_trans = []
 
         label_r = Image.open(os.path.join(agent_path + "birds_view_semantic_camera", str(idx) + '.png'))
-        # label_r.save("label.jpg")
-
         label = np.array(label_r)
         label_r.close()
 
@@ -243,7 +243,7 @@ class CarlaDataset(torch.utils.data.Dataset):
         return resize, resize_dims, crop, flip, rotate
 
 
-def compile_data(version, config, ood=False, augment_train=False, shuffle_train=True):
+def compile_data(version, config, ood=False, shuffle_train=True):
     dataroot = os.path.join("../data", config['dataset'])
     train_dataset = CarlaDataset(os.path.join(dataroot, "train/"))
 
@@ -254,11 +254,12 @@ def compile_data(version, config, ood=False, augment_train=False, shuffle_train=
 
     if version == "mini":
         train_dataset.length = 256
-        val_dataset.length = 128
+        val_dataset.length = 64
+        val_dataset.offset = 100
 
     train_loader = torch.utils.data.DataLoader(train_dataset,
                                                batch_size=config['batch_size'],
-                                               shuffle=True,
+                                               shuffle=shuffle_train,
                                                num_workers=config['num_workers'],
                                                drop_last=True)
 

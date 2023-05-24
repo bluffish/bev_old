@@ -20,18 +20,18 @@ torch.backends.cudnn.enabled = False
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 
 torch.multiprocessing.set_sharing_strategy('file_system')
-random.seed(1)
-np.random.seed(1)
-torch.manual_seed(1)
-torch.cuda.manual_seed(1)
+random.seed(0)
+np.random.seed(0)
+torch.manual_seed(0)
+torch.cuda.manual_seed(0)
 
 
 def get_val(model, val_loader, device, loss_fn, activation, num_classes):
     total_loss = 0.0
     iou = [0.0] * num_classes
 
-    y_true_m = []
-    y_score_m = []
+    y_true = []
+    y_score = []
     c = 0
 
     if config['type'] == 'dropout':
@@ -55,26 +55,19 @@ def get_val(model, val_loader, device, loss_fn, activation, num_classes):
             total_loss += loss * preds.shape[0]
             intersection, union = get_iou(preds, labels)
 
-            for i in range(0, num_classes):
-                if union[0] == 0:
-                    iou[i] += 1.0
-                else:
-                    iou[i] += intersection[i] / union[i] * preds.shape[0]
+            for cl in range(0, num_classes):
+                iou[cl] += 1 if union[0] == 0 else intersection[cl] / union[cl] * preds.shape[0]
 
-            if c < 100:
+            if c <= 64:
                 pmax = torch.argmax(preds, dim=1).cpu()
                 lmax = torch.argmax(labels, dim=1).cpu()
 
-                mask = torch.logical_or(pmax == 0, lmax == 0).bool()
+                u = uncertainty.ravel()
 
-                p = pmax[mask].ravel()
-                l = lmax[mask].ravel()
-                u = uncertainty[:, 0, :, :][mask].ravel()
+                misclassified = pmax != lmax
 
-                intersect = p != l
-
-                y_true_m += intersect
-                y_score_m += u
+                y_true += misclassified.ravel()
+                y_score += u
 
                 c += preds.shape[0]
             else:
@@ -84,12 +77,8 @@ def get_val(model, val_loader, device, loss_fn, activation, num_classes):
 
     iou = [i / len(val_loader.dataset) for i in iou]
 
-    try:
-        auroc = roc_auc_score(y_true_m, y_score_m)
-        aupr = average_precision_score(y_true_m, y_score_m)
-    except:
-        auroc = 0
-        aupr = 0
+    auroc = roc_auc_score(y_true, y_score)
+    aupr = average_precision_score(y_true, y_score)
 
     if config['type'] == 'dropout':
         model.module.tests = -1
@@ -106,7 +95,6 @@ def train():
 
     class_proportions = {
         "nuscenes": [.015, .2, .05, .735],
-        # "nuscenes": [0.0206, 0.173, 0.0294, 0.777],
         "carla": [0.0141, 0.3585, 0.02081, 0.6064]
     }
 
@@ -148,9 +136,7 @@ def train():
 
     writer = SummaryWriter(logdir=config['logdir'])
 
-    best_iou = 0.0
-    best_auroc = 0.0
-    best_aupr = 0.0
+    best_iou, best_auroc, best_aupr = 0, 0, 0
 
     step = 0
     epoch = 1
@@ -172,7 +158,7 @@ def train():
                 preds = activation(preds, dim=1)
 
             loss.backward()
-            # nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+            nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             opt.step()
 
             step += 1

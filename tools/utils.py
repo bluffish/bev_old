@@ -96,4 +96,3 @@ def save_pred(pred, labels, out_path):
     cv2.imwrite(os.path.join(out_path, "label.jpg"), labels)
 
     return pred, labels
-

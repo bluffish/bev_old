@@ -23,7 +23,7 @@ sns.set_context("notebook", font_scale=1.5,
                 rc={"lines.linewidth": 2.5})
 
 
-def eval(config, metrics=False, is_ood=False):
+def eval(config, plot=True, is_ood=False):
     device = torch.device('cpu') if len(config['gpus']) < 0 else torch.device(f'cuda:{config["gpus"][0]}')
     num_classes, classes = 4, ["vehicle", "road", "lane", "background"]
 
@@ -98,15 +98,8 @@ def eval(config, metrics=False, is_ood=False):
 
     iou = [0.0] * num_classes
 
-    if is_ood:
-        y_true = []
-        y_score = []
-    else:
-        y_true = [[], [], [], []]
-        y_score = [[], [], [], []]
-
-        y_true_a = []
-        y_score_a = []
+    y_true = []
+    y_score = []
 
     with torch.no_grad():
         for (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels, ood) in tqdm(val_loader):
@@ -126,14 +119,11 @@ def eval(config, metrics=False, is_ood=False):
             save_pred(preds, labels, config['logdir'])
 
             if is_ood:
-                l = ood.ravel()
-                u = uncertainty.ravel()
-
                 cv2.imwrite(os.path.join(config['logdir'], f"ood.jpg"),
                            ood[0].cpu().numpy()*255)
 
-                y_true += l.cpu()
-                y_score += u.cpu()
+                y_true += ood.ravel().cpu()
+                y_score += uncertainty.ravel().cpu()
             else:
                 intersect, union = get_iou(preds, labels)
 
@@ -143,36 +133,25 @@ def eval(config, metrics=False, is_ood=False):
                 pmax = torch.argmax(preds, dim=1).cpu()
                 lmax = torch.argmax(labels, dim=1).cpu()
 
-                for cl in range(num_classes):
-                    mask = torch.logical_or(pmax == cl, lmax == cl).bool()
+                u = uncertainty.ravel()
 
-                    p = pmax[mask].ravel()
-                    l = lmax[mask].ravel()
-                    u = uncertainty[:, 0, :, :][mask].ravel()
+                misclassified = pmax != lmax
+                cv2.imwrite(os.path.join(config['logdir'], "mask.jpg"), misclassified[0].cpu().numpy()*255)
 
-                    intersect = p != l
-
-                    y_true[cl] += intersect
-                    y_score[cl] += u
+                y_true += misclassified.ravel()
+                y_score += u
 
     if is_ood:
-        # plt.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
-
-        # plt.clf()
-        # plt.hist(y_score, bins=10, range=[0,1])
-        # plt.xlim(0, 1)
-        # plt.savefig("vacuity_histogram.png")
-        # plt.clf()
-
         pr, rec, _ = precision_recall_curve(y_true, y_score)
         fpr, tpr, _ = roc_curve(y_true, y_score)
+
+        y_score_binary = [x > .5 for x in y_score]
+        print(classification_report(y_true, y_score_binary))
+        plt.ylim([0, 1.05])
+
         aupr = average_precision_score(y_true, y_score)
         auroc = roc_auc_score(y_true, y_score)
 
-        # y_score_binary = [x > .5 for x in y_score]
-        # print(confusion_matrix(y_true, y_score_binary))
-        # print(classification_report(y_true, y_score_binary))
-        plt.ylim([0, 1.05])
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
         rcd = RocCurveDisplay(fpr=fpr, tpr=tpr)
         prd = PrecisionRecallDisplay(precision=pr, recall=rec)
@@ -184,56 +163,52 @@ def eval(config, metrics=False, is_ood=False):
         ax2.legend()
 
         plt.ylim([0, 1.05])
-        fig.suptitle("OOD")
+        fig.suptitle(f"OOD - {config['backbone']}-{config['type']}")
 
         save_path = os.path.join(config['logdir'], f"combined_ood.jpg")
         print(f"Saving combined for OOD at {save_path}\n"
               f"OOD - AUPR: {aupr} AUROC: {auroc}")
         plt.savefig(save_path)
         plt.clf()
-        # return pr, rec, fpr, tpr, aupr, auroc, 0
+        return pr, rec, fpr, tpr, aupr, auroc
+
     else:
-        iou = [i / len(val_loader.dataset) for i in iou]
+        iou = [i / (len(val_loader.dataset) - len(val_loader.dataset) % config['batch_size']) for i in iou]
 
         print(f'iou: {iou}')
 
-        if metrics:
-            auroc = []
-            aupr = []
+        pr, rec, _ = precision_recall_curve(y_true, y_score)
+        fpr, tpr, _ = roc_curve(y_true, y_score)
 
-            for cl in range(num_classes):
-                aupr.append(average_precision_score(y_true[cl], y_score[cl]))
-                auroc.append(roc_auc_score(y_true[cl], y_score[cl]))
+        aupr = auc(rec, pr)
+        auroc = auc(fpr, tpr)
+        no_skill = np.sum(y_true) / len(y_true)
 
-            return aupr, auroc, iou
-        else:
-            # for cl in range(num_classes):
-            cl = 0
-            pr, rec, _ = precision_recall_curve(y_true[cl], y_score[cl])
-            fpr, tpr, _ = roc_curve(y_true[cl], y_score[cl])
-
-            aupr = average_precision_score(y_true[cl], y_score[cl])
-            auroc = roc_auc_score(y_true[cl], y_score[cl])
-
+        if plot:
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
-            rcd = RocCurveDisplay(fpr=fpr, tpr=tpr)
-            prd = PrecisionRecallDisplay(precision=pr, recall=rec)
 
-            rcd.plot(ax=ax1, label=f"{config['backbone']}-{config['type']}\nAUROC={auroc:.3f}")
-            prd.plot(ax=ax2, label=f"{config['backbone']}-{config['type']}\nAUPR={aupr:.3f}")
-
+            ax1.plot(fpr, tpr, 'b-', label=f'AUROC - {auroc:.3f}')
+            ax1.plot([0, 1], [0, 1], linestyle='--', color='gray', label='No Skill - 0.500')
+            ax1.set_xlabel('False Positive Rate')
+            ax1.set_ylabel('True Positive Rate')
             ax1.legend()
+
+            ax2.plot(rec, pr, 'r-', label=f'AUPR - {aupr:.3f}')
+            ax2.plot([0, 1], [no_skill, no_skill], linestyle='--', color='gray', label=f'No Skill - {no_skill:.3f}')
+            ax2.set_xlabel('Recall')
+            ax2.set_ylabel('Precision')
             ax2.legend()
 
             plt.ylim([0, 1.05])
-            fig.suptitle(classes[cl])
+            fig.suptitle(f"{'OOD' if is_ood else 'Misclassification'} - {config['backbone']}-{config['type']}")
 
-            save_path = os.path.join(config['logdir'], f"combined_{classes[cl]}.jpg")
-            print(f"Saving combined for {classes[cl]} class at {save_path}\n"
-                  f"{classes[cl]} CLASS - AUPR: {aupr} AUROC: {auroc}")
+            save_path = os.path.join(config['logdir'], f"combined_{'ood' if is_ood else 'misclassification'}_{config['type']}.jpg")
+            print(f"Saving combined {'ood' if is_ood else 'misclassification'} at {save_path}\n"
+                  f"AUPR: {aupr} AUROC: {auroc}")
+
             plt.savefig(save_path)
 
-            return pr, rec, fpr, tpr, aupr, auroc, iou[cl]
+        return pr, rec, fpr, tpr, aupr, auroc, iou, no_skill
 
 
 if __name__ == "__main__":
@@ -265,4 +240,4 @@ if __name__ == "__main__":
     if args.logdir is not None:
         config['logdir'] = args.logdir
 
-    eval(config, is_ood=is_ood, metrics=False)
+    eval(config, is_ood=is_ood)

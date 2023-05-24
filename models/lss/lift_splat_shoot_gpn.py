@@ -66,8 +66,7 @@ class BevEncodeGPN(nn.Module):
         beta = beta.reshape(-1, 200, 200, self.outC).permute(0, 3, 1, 2).contiguous()
 
         if self.last is not None:
-            # beta = self.last(beta.log()).exp()
-            beta = self.last(beta).relu()
+            beta = self.last(beta.log()).exp()
         alpha = beta + 1
 
         if self.tsne:
