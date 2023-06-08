@@ -7,18 +7,15 @@ import numpy as np
 from PIL import Image
 import cv2
 from pyquaternion import Quaternion
+
 from nuscenes.eval.common.utils import quaternion_yaw
 from nuscenes.nuscenes import NuScenes
-from nuscenes.utils.geometry_utils import view_points, box_in_image, BoxVisibility, transform_matrix
 from nuscenes.utils.splits import create_splits_scenes
 from nuscenes.utils.data_classes import Box
 from nuscenes.map_expansion.map_api import NuScenesMap
 
-import matplotlib.pyplot as plt
 from glob import glob
 import torchvision
-
-from datasets.carla import mask
 
 
 class NormalizeInverse(torchvision.transforms.Normalize):
@@ -149,11 +146,11 @@ class NuscData(torch.utils.data.Dataset):
             'Ncams': ncams,
         }
 
-        self.ood_classes_train = ['vehicle.bus.rigid', "vehicle.bus.bendy"]
-        self.ood_classes_val = ['vehicle.construction']
+        # self.ood_classes_train = ['vehicle.bus.rigid', "vehicle.bus.bendy"]
+        # self.ood_classes_val = ['vehicle.construction']
         # self.ood_classes_train = ["static_object.bicycle_rack"]
         self.ood_classes_val = []
-
+        self.ood_classes_train = []
         self.all_ood = self.ood_classes_train + self.ood_classes_val
 
         if is_train:
@@ -483,13 +480,14 @@ def get_map(rec, nusc_maps, nusc, scene2map, dx, bx):
     return road.astype(np.uint8), lane.astype(np.uint8)
 
 
-def compile_data(version, config, ood=False, augment_train=False, shuffle_train=True):
+def compile_data(version, config, ood=False, augment_train=False, shuffle_train=True, seg=False):
     dataroot = os.path.join("../data", config['dataset'])
     nusc = NuScenes(version='v1.0-{}'.format(version),
                     dataroot=os.path.join(dataroot, version),
                     verbose=False)
     flipped = config['backbone'] == 'lss'
-    dims = (128, 352) if config['backbone'] == 'lss' else (224, 480)
+    dims = (128, 352)
+    # if config['backbone'] == 'lss' else (224, 480)
     print(f"Flipped: {flipped}")
     print(f"Dims: {dims}")
     print(os.path.join(dataroot, version))

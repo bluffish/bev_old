@@ -43,7 +43,7 @@ class EfficientNetExtractor(torch.nn.Module):
         # [f1, f2], where f1 is 'reduction_1', which is shape [b, d, 128, 128]
         backbone(x)
     """
-    def __init__(self, layer_names, image_height, image_width, model_name='efficientnet-b4'):
+    def __init__(self, layer_names, image_height, image_width, model_name='efficientnet-b4', channels=3):
         super().__init__()
 
         assert model_name in MODELS
@@ -59,7 +59,7 @@ class EfficientNetExtractor(torch.nn.Module):
                 layer_to_idx[layer_name] = i
 
         # We can set memory efficient swish to false since we're using checkpointing
-        net = EfficientNet.from_pretrained(model_name)
+        net = EfficientNet.from_pretrained(model_name, in_channels=channels)
         net.set_swish(False)
 
         drop = net._global_params.drop_connect_rate / len(net._blocks)
@@ -77,7 +77,7 @@ class EfficientNetExtractor(torch.nn.Module):
         self.idx_pick = [layer_to_idx[l] for l in layer_names]
 
         # Pass a dummy tensor to precompute intermediate shapes
-        dummy = torch.rand(1, 3, image_height, image_width)
+        dummy = torch.rand(1, channels, image_height, image_width)
         output_shapes = [x.shape for x in self(dummy)]
 
         self.output_shapes = output_shapes

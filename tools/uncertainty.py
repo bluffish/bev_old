@@ -6,20 +6,10 @@ def activate_uce(alpha):
     return alpha / torch.sum(alpha, dim=1, keepdim=True)
 
 
-def entropy_dropout(pred):
-    mean = []
-
-    for p in pred:
-        mean.append(p.softmax(dim=1))
-
-    mean = torch.mean(mean, dim=0)
-    class_num = mean.shape[1]
-    prob = mean
-
-    e = - prob * (torch.log(prob) / torch.log(class_num))
-    total_un = torch.sum(e, dim=1, keepdim=True)
-
-    return total_un
+def aleatoric(alpha):
+    soft = activate_uce(alpha)
+    max_soft, hard = soft.max(dim=1)
+    return (1-max_soft[:, None, :, :])/torch.max(1-max_soft[:, None, :, :])
 
 
 def dissonance(alpha):
@@ -42,14 +32,33 @@ def dissonance(alpha):
             dis_un[k] += dis_ki
     return dis_un
 
+
 def Bal(b_i, b_j):
     result = 1 - torch.abs(b_i - b_j) / (b_i + b_j + 1e-7)
     return result
 
 
+def softmax(x):
+    if x.ndim == 4:
+        return torch.softmax(x, dim=1)
+    else:
+        # soft = torch.softmax(x, dim=2)
+        # return torch.mean(soft, dim=0)
+        mean = torch.mean(x, dim=0)
+        return torch.softmax(mean, dim=1)
+
+
+def varep(x):
+    var = torch.var(x, dim=0)
+
+    epis = 1 - 1 / var
+
+    return epis
+
+
 def entropy(pred):
-    class_num = pred.shape[1]
-    prob = pred.softmax(dim=1) + 1e-10
+    class_num = 4
+    prob = softmax(pred) + 1e-10
     e = - prob * (torch.log(prob) / np.log(class_num))
     u = torch.sum(e, dim=1, keepdim=True)
 
@@ -61,4 +70,5 @@ def vacuity(alpha):
     S = torch.sum(alpha, dim=1, keepdim=True)
     v = class_num / S
 
-    return v
+    return v / torch.max(v)
+    # return v

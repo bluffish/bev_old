@@ -36,20 +36,45 @@ class UCELoss(torch.nn.Module):
         self.num_classes = num_classes
         self.weights = weights.view(1, self.num_classes, 1, 1)
 
-    def forward(self, alpha, y, epoch_num):
+    def loss(self, alpha, y):
         S = torch.sum(alpha, dim=1, keepdim=True)
 
         A = torch.sum(y * (torch.digamma(S) - torch.digamma(alpha) + 1e-10) * self.weights, dim=1, keepdim=True)
 
-        annealing_coef = torch.min(
-            torch.tensor(1.0, dtype=torch.float32),
-            torch.tensor(epoch_num / 8, dtype=torch.float32),
-        )
+        return A.mean()
 
-        kl_alpha = (alpha - 1) * (1 - y) + 1
-        kl_div = annealing_coef * kl_divergence(kl_alpha, self.num_classes, device=alpha.device)
+    def forward(self, alpha, y, alpha_s, y_s):
 
-        return (A + kl_div).mean()
+        k = self.loss(alpha, y)
+
+        if alpha_s is None:
+            return k
+        else:
+            return self.loss(alpha_s, y_s) + k
+
+
+class CELoss(torch.nn.Module):
+    def __init__(
+            self,
+            weights: Optional[Tensor] = None,
+            num_classes=4
+    ):
+        super().__init__()
+        self.num_classes = num_classes
+        self.weights = weights.view(1, self.num_classes, 1, 1)
+
+        self.loss_fn = torch.nn.CrossEntropyLoss(weight=weights)
+
+    def forward(self, pred, target, pred_s, target_s):
+        if pred.ndim > 4:
+            pred = torch.mean(pred, dim=0)
+
+        k = self.loss_fn(pred, target)
+
+        if pred_s is None:
+            return k
+        else:
+            return self.loss_fn(pred_s, target_s) + k
 
 
 def scatter(x, classes, colors):

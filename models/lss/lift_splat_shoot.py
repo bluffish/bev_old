@@ -5,6 +5,7 @@ import torch
 from torch import nn
 from efficientnet_pytorch import EfficientNet
 from torchvision.models.resnet import resnet18
+from models.seg.unet import UNet
 
 
 def inverse(x):
@@ -79,12 +80,15 @@ class Up(nn.Module):
 
 
 class CamEncode(nn.Module):
-    def __init__(self, D, C):
+    def __init__(self, D, C, use_seg=False):
         super(CamEncode, self).__init__()
         self.D = D
         self.C = C
 
-        self.trunk = EfficientNet.from_pretrained("efficientnet-b0")
+        if use_seg:
+            self.trunk = EfficientNet.from_pretrained("efficientnet-b0", in_channels=7)
+        else:
+            self.trunk = EfficientNet.from_pretrained("efficientnet-b0", in_channels=3)
 
         self.up1 = Up(320 + 112, 512)
         self.depthnet = nn.Conv2d(512, self.D + self.C, kernel_size=1, padding=0)
@@ -174,7 +178,8 @@ class LiftSplatShoot(nn.Module):
             z_bound=[-10.0, 10.0, 20.0],
             d_bound=[4.0, 45.0, 1.0],
             final_dim=(128, 352),
-            outC=4
+            outC=4,
+            use_seg=False
     ):
         super(LiftSplatShoot, self).__init__()
 
@@ -195,10 +200,14 @@ class LiftSplatShoot(nn.Module):
         self.camC = 64
         self.frustum = self.create_frustum()
         self.D, _, _, _ = self.frustum.shape
-        self.camencode = CamEncode(self.D, self.camC)
+        self.camencode = CamEncode(self.D, self.camC, use_seg=use_seg)
         self.bevencode = BevEncode(inC=self.camC, outC=outC)
 
         self.tsne = False
+
+        if use_seg:
+            self.seg = UNet(n_channels=3, n_classes=outC)
+        self.use_seg = use_seg
 
     def create_frustum(self):
         # make grid in image plane
@@ -298,10 +307,15 @@ class LiftSplatShoot(nn.Module):
         return x
 
     def forward(self, x, rots, trans, intrins, extrins, post_rots, post_trans):
+        if self.use_seg and x.shape[2] == 3:
+            seg = self.seg(x.view(-1, 3, 128, 352))
+            x = torch.cat((x, seg.view(-1, 6, 4, 128, 352)), dim=2)
+        else: seg = None
+
         x = self.get_voxels(x, rots, trans, intrins, post_rots, post_trans)
         x = self.bevencode(x)
 
-        return x
+        return x, seg
 
 
 class LiftSplatShootENN(LiftSplatShoot):
@@ -312,7 +326,8 @@ class LiftSplatShootENN(LiftSplatShoot):
             z_bound=[-10.0, 10.0, 20.0],
             d_bound=[4.0, 45.0, 1.0],
             final_dim=(128, 352),
-            outC=4
+            outC=4,
+            use_seg=False
     ):
         super(LiftSplatShootENN, self).__init__(
             x_bound=x_bound,
@@ -320,10 +335,18 @@ class LiftSplatShootENN(LiftSplatShoot):
             z_bound=z_bound,
             d_bound=d_bound,
             final_dim=final_dim,
-            outC=outC)
+            outC=outC,
+            use_seg=use_seg
+        )
 
     def forward(self, x, rots, trans, intrins, extrins, post_rots, post_trans):
-        logits = super().forward(x, rots, trans, intrins, extrins, post_rots, post_trans)
-        alpha = logits.relu() + 1
+        beta, beta_s = super().forward(x, rots, trans, intrins, extrins, post_rots, post_trans)
 
-        return alpha
+        if beta_s is not None:
+            alpha_s = beta_s.relu() + 1
+        else:
+            alpha_s = None
+
+        # alpha = torch.log(beta.relu()).relu() + 1
+        alpha = beta.relu() + 1
+        return alpha, alpha_s

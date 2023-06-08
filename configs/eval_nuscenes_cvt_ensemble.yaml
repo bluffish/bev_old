@@ -1,0 +1,10 @@
+type: 'ensemble'
+backbone: 'cvt'
+dataset: 'nuscenes'
+logdir: './nuscenes/cvt_ensemble'
+gpus: [0]
+batch_size: 8
+num_workers: 16
+model_path: 'nuscenes/cvt_ensemble/best_iou.pt'
+tsne: false
+seg: false

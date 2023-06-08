@@ -8,7 +8,7 @@ import math
 import torch
 import json
 import os
-
+import cv2
 
 def get_camera_info(translation, rotation, sensor_options):
     roll = math.radians(rotation[2] - 90)
@@ -75,7 +75,8 @@ class CarlaDataset(torch.utils.data.Dataset):
             rot_lim=(-5.4, 5.4),
             rand_flip=True,
             is_train=False,
-            ood = False
+            ood=False,
+            seg=False,
     ):
         self.ood = ood
 
@@ -103,6 +104,7 @@ class CarlaDataset(torch.utils.data.Dataset):
         self.is_train = is_train
 
         self.offset = 0
+        self.seg = seg
 
     def __len__(self):
         return self.length
@@ -118,6 +120,8 @@ class CarlaDataset(torch.utils.data.Dataset):
         rots = []
         trans = []
         intrins = []
+        extrins = []
+
         post_rots = []
         post_trans = []
 
@@ -130,7 +134,6 @@ class CarlaDataset(torch.utils.data.Dataset):
         road = mask(label, (128, 64, 128))
         lane = mask(label, (157, 234, 50))
         vehicles = mask(label, (0, 0, 142))
-        # ood = torch.tensor(mask(label, (0,0,0)))
         ood = torch.tensor(mask(label, (0, 0, 142)))
 
         empty[vehicles == 1] = 0
@@ -144,6 +147,8 @@ class CarlaDataset(torch.utils.data.Dataset):
             if sensor_info["sensor_type"] == "sensor.camera.rgb" and sensor_name != "birds_view_camera":
                 image = Image.open(os.path.join(agent_path + sensor_name, str(idx) + '.png'))
                 image_seg = Image.open(os.path.join(agent_path + sensor_name + "_semantic", str(idx) + '.png'))
+                # image_pid = Image.open(os.path.join(agent_path + sensor_name + "_tripid2", str(idx) + '.png'))
+
                 depth_p = Image.open(os.path.join(agent_path + sensor_name + "_depth", str(idx) + '.png'))
 
                 tran = sensor_info["transform"]["location"]
@@ -152,6 +157,13 @@ class CarlaDataset(torch.utils.data.Dataset):
 
                 rot, tran, intrin = get_camera_info(tran, rot, sensor_options)
                 resize, resize_dims, crop, flip, rotate = self.sample_augmentation()
+
+                extrin = torch.eye(4)
+
+                extrin[:3, :3] = rot
+                extrin[:3, -1] = tran
+
+                extrins.append(extrin)
 
                 post_rot = torch.eye(2)
                 post_tran = torch.zeros(2)
@@ -182,10 +194,6 @@ class CarlaDataset(torch.utils.data.Dataset):
                 post_tran[:2] = post_tran2
                 post_rot[:2, :2] = post_rot2
 
-                img_seg = np.array(img_seg)
-                img_seg = mask(img_seg, (0, 0, 142))
-                img_seg = torch.tensor(img_seg)[None, :, :]
-
                 depth = np.array(depth)
                 depth = depth[:, :, 0] + depth[:, :, 1] * 256 + depth[:, :, 2] * 256 * 256
                 depth = depth / (256 * 256 * 256 - 1)
@@ -196,7 +204,21 @@ class CarlaDataset(torch.utils.data.Dataset):
 
                 depth = torch.tensor(depth)[None, :, :]
 
-                imgs.append(self.normalize_img(img))
+                ni = self.normalize_img(img)
+
+                if self.seg:
+                    img_seg = np.array(img_seg)
+
+                    vehicles = mask(img_seg, (0, 0, 142))[None]
+                    road = mask(img_seg, (128, 64, 128))[None]
+                    lane = mask(img_seg, (157, 234, 50))[None]
+
+                    img_seg = np.concatenate((vehicles, road, lane))
+                    img_seg = torch.tensor(img_seg)
+
+                    ni = torch.cat((ni, img_seg), 0)
+
+                imgs.append(ni)
                 img_segs.append(img_seg)
                 depths.append(depth)
 
@@ -212,7 +234,7 @@ class CarlaDataset(torch.utils.data.Dataset):
 
         return (torch.stack(imgs).float(),
                 torch.stack(rots).float(), torch.stack(trans).float(),
-                torch.stack(intrins).float(),  torch.zeros((1,1)), torch.stack(post_rots).float(), torch.stack(post_trans).float(),
+                torch.stack(intrins).float(), torch.stack(extrins).float(), torch.stack(post_rots).float(), torch.stack(post_trans).float(),
                 label.float(), ood.float())
 
     def sample_augmentation(self):
@@ -243,19 +265,24 @@ class CarlaDataset(torch.utils.data.Dataset):
         return resize, resize_dims, crop, flip, rotate
 
 
-def compile_data(version, config, ood=False, shuffle_train=True):
+def compile_data(version, config, ood=False, shuffle_train=True, seg=False, cvp=None):
     dataroot = os.path.join("../data", config['dataset'])
-    train_dataset = CarlaDataset(os.path.join(dataroot, "train/"))
+    train_dataset = CarlaDataset(os.path.join(dataroot, "train/"), seg=seg)
+    import random
+
+    torch.manual_seed(0)
 
     if ood:
-        val_dataset = CarlaDataset(os.path.join(dataroot, "val_ood_old/"), ood=ood)
+        val_dataset = CarlaDataset(os.path.join(dataroot, "val_ood/"), ood=ood, seg=seg)
     else:
-        val_dataset = CarlaDataset(os.path.join(dataroot, "val/"), ood=ood)
+        val_dataset = CarlaDataset(os.path.join(dataroot, "val/" if cvp is None else cvp), ood=ood, seg=seg)
 
     if version == "mini":
-        train_dataset.length = 256
+        # val_dataset = torch.utils.data.Subset(val_dataset,  random.sample(range(len(val_dataset)), k=64))
         val_dataset.length = 64
-        val_dataset.offset = 100
+
+        if config['seg'] and config['backbone'] == 'cvt':
+            val_dataset.offset = 256
 
     train_loader = torch.utils.data.DataLoader(train_dataset,
                                                batch_size=config['batch_size'],
@@ -265,7 +292,7 @@ def compile_data(version, config, ood=False, shuffle_train=True):
 
     val_loader = torch.utils.data.DataLoader(val_dataset,
                                              batch_size=config['batch_size'],
-                                             shuffle=False,
+                                             shuffle=True,
                                              num_workers=config['num_workers'],
                                              drop_last=True)
 

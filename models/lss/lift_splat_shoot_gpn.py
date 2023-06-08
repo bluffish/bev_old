@@ -76,7 +76,16 @@ class BevEncodeGPN(nn.Module):
 
 
 class LiftSplatShootGPN(LiftSplatShoot):
-    def __init__(self, outC=4):
-        super(LiftSplatShootGPN, self).__init__(outC=outC)
+    def __init__(self, outC=4, use_seg=False):
+        super(LiftSplatShootGPN, self).__init__(outC=outC, use_seg=use_seg)
 
         self.bevencode = BevEncodeGPN(inC=self.camC, outC=self.outC)
+        self.use_seg = use_seg
+
+    def forward(self, x, rots, trans, intrins, extrins, post_rots, post_trans):
+        p, s = super().forward(x, rots, trans, intrins, extrins, post_rots, post_trans)
+
+        if s is not None:
+            return p, s.relu() + 1
+        else:
+            return p, None
