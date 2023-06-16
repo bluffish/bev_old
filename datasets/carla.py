@@ -1,3 +1,4 @@
+from torch.utils.data import DistributedSampler
 from transforms3d.euler import euler2mat
 from PIL import Image
 
@@ -206,18 +207,6 @@ class CarlaDataset(torch.utils.data.Dataset):
 
                 ni = self.normalize_img(img)
 
-                if self.seg:
-                    img_seg = np.array(img_seg)
-
-                    vehicles = mask(img_seg, (0, 0, 142))[None]
-                    road = mask(img_seg, (128, 64, 128))[None]
-                    lane = mask(img_seg, (157, 234, 50))[None]
-
-                    img_seg = np.concatenate((vehicles, road, lane))
-                    img_seg = torch.tensor(img_seg)
-
-                    ni = torch.cat((ni, img_seg), 0)
-
                 imgs.append(ni)
                 img_segs.append(img_seg)
                 depths.append(depth)
@@ -265,17 +254,16 @@ class CarlaDataset(torch.utils.data.Dataset):
         return resize, resize_dims, crop, flip, rotate
 
 
-def compile_data(version, config, ood=False, shuffle_train=True, seg=False, cvp=None):
+def compile_data(version, config, ood=False, shuffle_train=True, cvp=None):
     dataroot = os.path.join("../data", config['dataset'])
-    train_dataset = CarlaDataset(os.path.join(dataroot, "train/"), seg=seg)
-    import random
+    train_dataset = CarlaDataset(os.path.join(dataroot, "train/"))
 
     torch.manual_seed(0)
 
     if ood:
-        val_dataset = CarlaDataset(os.path.join(dataroot, "val_ood/"), ood=ood, seg=seg)
+        val_dataset = CarlaDataset(os.path.join(dataroot, "val_ood/"), ood=ood)
     else:
-        val_dataset = CarlaDataset(os.path.join(dataroot, "val/" if cvp is None else cvp), ood=ood, seg=seg)
+        val_dataset = CarlaDataset(os.path.join(dataroot, "val/" if cvp is None else cvp), ood=ood)
 
     if version == "mini":
         # val_dataset = torch.utils.data.Subset(val_dataset,  random.sample(range(len(val_dataset)), k=64))
@@ -292,7 +280,7 @@ def compile_data(version, config, ood=False, shuffle_train=True, seg=False, cvp=
 
     val_loader = torch.utils.data.DataLoader(val_dataset,
                                              batch_size=config['batch_size'],
-                                             shuffle=True,
+                                             shuffle=False,
                                              num_workers=config['num_workers'],
                                              drop_last=True)
 

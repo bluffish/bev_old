@@ -30,14 +30,16 @@ def train():
     num_classes, classes = 4, ["vehicle", "road", "lane", "background"]
 
     compile_data = compile_data_carla if config['dataset'] == 'carla' else compile_data_nuscenes
-    train_loader, val_loader = compile_data("trainval", config, shuffle_train=True)
+    train_loader, val_loader = compile_data("trainval", config, shuffle_train=True, ood=True)
 
     class_proportions = {
         "nuscenes": [.015, .2, .05, .735],
         "carla": [0.0141, 0.3585, 0.02081, 0.6064]
     }
 
-    activation, loss_fn, model = get_model(config['type'], config['backbone'], num_classes, device)
+    activation = activate_uce
+    loss_fn = UCELossReg(weights=torch.tensor([3.0, 1.0, 2.0, 1.0]).to(device)).to(device)
+    model = LiftSplatShootENN(outC=4)
 
     if "postnet" in config['type']:
         if config['backbone'] == 'lss':
@@ -47,14 +49,11 @@ def train():
 
     model = nn.DataParallel(model, device_ids=config['gpus']).to(device).train()
 
-    if config['type'] == 'baseline' or config['type'] == 'dropout' or config['type'] == 'ensemble':
-        uncertainty_function = entropy
-    elif config['type'] == 'enn' or config['type'] == 'postnet':
-        uncertainty_function = aleatoric
+    uncertainty_function = vacuity
 
-    if "pretrained" in config:
-        print(f"Loading pretrained weights from {config['pretrained']}")
-        model.load_state_dict(torch.load(config["pretrained"]), strict=False)
+    if pretrained is not None:
+        print(f"Loading pretrained weights from {pretrained}")
+        model.load_state_dict(torch.load(pretrained), strict=False)
 
     if config['backbone'] == 'lss':
         opt = torch.optim.Adam(model.parameters(), lr=config['learning_rate'], weight_decay=config['weight_decay'])
@@ -71,13 +70,13 @@ def train():
     print("--------------------------------------------------")
     print(f"Starting training on {config['type']} model with {config['backbone']} backbone")
     print(f"Using GPUS: {config['gpus']}")
-    print("Training using CARLA")
     print(f"Train loader: {len(train_loader.dataset)}")
     print(f"Val loader: {len(val_loader.dataset)}")
     print(f"Batch size: {config['batch_size']}")
     print(f"Output directory: {config['logdir']} ")
-
     print("--------------------------------------------------")
+
+    config['val_step'] = 250
 
     writer = SummaryWriter(logdir=config['logdir'])
 
@@ -90,9 +89,11 @@ def train():
             t0 = time()
             opt.zero_grad(set_to_none=True)
             labels = labels.to(device)
+            ood = ood.to(device)
 
             preds = model(imgs, rots, trans, intrins, extrins, post_rots, post_trans)
-            loss = loss_fn(preds, labels)
+            loss = loss_fn(preds, labels, ood)
+            uncertainty = uncertainty_function(preds).detach().cpu()
 
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 5.0)
@@ -112,6 +113,10 @@ def train():
                 writer.add_scalar('train/step_time', t1 - t0, step)
                 writer.add_scalar('train/loss', loss, step)
                 save_pred(preds, labels, config['logdir'])
+                cv2.imwrite(os.path.join(config['logdir'], "uncertainty_map.png"),
+                            cv2.cvtColor((plt.cm.jet(uncertainty[0][0]) * 255).astype(np.uint8), cv2.COLOR_RGB2BGR))
+                cv2.imwrite(os.path.join(config['logdir'], f"ood.png"),
+                            ood[0].cpu().numpy() * 255)
 
             if step % 50 == 0:
                 intersection, union = get_iou(preds, labels)
@@ -132,9 +137,9 @@ def train():
                                                                                          uncertainty_function,
                                                                                          activation,
                                                                                          device,
-                                                                                         config)
+                                                                                         config, is_ood=True)
 
-                intersect, union = get_iou(predictions, ground_truths)
+                intersect, union = get_iou(torch.softmax(predictions, dim=1), ground_truths)
                 val_iou = [intersect[i] / union[i] for i in range(len(intersect))]
 
                 fpr, tpr, rec, pr, auroc, aupr, no_skill = roc_pr(uncertainty_scores, uncertainty_labels)
@@ -180,10 +185,10 @@ if __name__ == "__main__":
     parser.add_argument('-g', '--gpus', nargs='+', required=False)
     parser.add_argument('-l', '--logdir', required=False)
     parser.add_argument('-b', '--batch_size', required=False)
-    parser.add_argument('--gt', default=False, action='store_true')
+    parser.add_argument('-p', '--pretrained', required=False)
 
     args = parser.parse_args()
-    gt = args.gt
+    pretrained = args.pretrained
 
     print(f"Using config {args.config}")
 

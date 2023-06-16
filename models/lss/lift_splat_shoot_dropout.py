@@ -1,12 +1,9 @@
 from models.lss.lift_splat_shoot import *
 
-import cv2
-import matplotlib.pyplot as plt
 
 class LiftSplatShootDropout(LiftSplatShoot):
-    def __init__(self, outC=4, use_seg=False):
-        super(LiftSplatShootDropout, self).__init__(outC=outC,
-                                                    use_seg=use_seg)
+    def __init__(self, outC=4):
+        super(LiftSplatShootDropout, self).__init__(outC=outC)
 
         self.bevencode.up1.conv = nn.Sequential(
             nn.Conv2d(self.bevencode.up1.in_channels, self.bevencode.up1.out_channels, kernel_size=3, padding=1, bias=False),
@@ -29,20 +26,12 @@ class LiftSplatShootDropout(LiftSplatShoot):
         )
 
         self.tests = 1
-        self.use_seg = use_seg
 
     def forward(self, x, rots, trans, intrins, extrins, post_rots, post_trans):
         outputs = []
-        seg_outputs = []
 
         for i in range(self.tests):
-            p, s = super().forward(x, rots, trans, intrins, extrins, post_rots, post_trans)
+            outputs.append(super().forward(x, rots, trans, intrins, extrins, post_rots, post_trans))
 
-            outputs.append(p)
-            seg_outputs.append(s)
-
-        outputs = torch.stack(outputs)
-        seg_outputs = torch.stack(seg_outputs) if seg_outputs[0] is not None else None
-
-        return outputs, seg_outputs
+        return torch.stack(outputs, dim=0)
 

@@ -1,5 +1,3 @@
-import random
-from time import time
 
 import torch
 import os
@@ -7,6 +5,7 @@ import numpy as np
 from PIL import Image
 import cv2
 from pyquaternion import Quaternion
+from shapely.geometry import Point, Polygon
 
 from nuscenes.eval.common.utils import quaternion_yaw
 from nuscenes.nuscenes import NuScenes
@@ -28,19 +27,6 @@ class NormalizeInverse(torchvision.transforms.Normalize):
 
     def __call__(self, tensor):
         return super().__call__(tensor.clone())
-
-
-normalize_img = torchvision.transforms.Compose((
-    torchvision.transforms.ToTensor(),
-    torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225]),
-))
-
-denormalize_img = torchvision.transforms.Compose((
-    NormalizeInverse(mean=[0.485, 0.456, 0.406],
-                     std=[0.229, 0.224, 0.225]),
-    torchvision.transforms.ToPILImage(),
-))
 
 
 def gen_dx_bx(x_bound, y_bound, z_bound):
@@ -105,6 +91,12 @@ def get_pose(rotation, translation, inv=False, flat=False):
     return get_transformation_matrix(R, t, inv=inv)
 
 
+def is_on_road(nusc_map, x, y, layer_name='drivable_area'):
+    point = Point(x, y)
+    records = nusc_map.get_records_in_radius(x, y, layer_names=[layer_name], radius=0.1)
+    return len(records[layer_name]) > 0
+
+
 class NuscData(torch.utils.data.Dataset):
     def __init__(self,
                  nusc,
@@ -146,11 +138,13 @@ class NuscData(torch.utils.data.Dataset):
             'Ncams': ncams,
         }
 
-        # self.ood_classes_train = ['vehicle.bus.rigid', "vehicle.bus.bendy"]
-        # self.ood_classes_val = ['vehicle.construction']
-        # self.ood_classes_train = ["static_object.bicycle_rack"]
+        self.ood_classes_train = ["human.pedestrian.adult", "human.pedestrian.child", "human.pedestrian.construction_worker", "human.pedestrian.personal_mobility", "human.pedestrian.police_officer", "human.pedestrian.stroller", "human.pedestrian.wheelchair"]
         self.ood_classes_val = []
-        self.ood_classes_train = []
+        # self.ood_classes_train = []
+
+        # self.ood_classes_train = ["vehicle.bus.bendy", "vehicle.bus.rigid"]
+        # self.ood_classes_val = ["vehicle.construction"]
+
         self.all_ood = self.ood_classes_train + self.ood_classes_val
 
         if is_train:
@@ -164,59 +158,18 @@ class NuscData(torch.utils.data.Dataset):
         self.nusc_maps = nusc_maps
         self.is_train = is_train
         self.scenes = self.get_scenes()
-        self.ixes = self.prepro()
-
-        self.v = 0
-        self.r = 0
-        self.l = 0
-        self.b = 0
 
         dx, bx, nx = gen_dx_bx(self.grid_conf['xbound'], self.grid_conf['ybound'], self.grid_conf['zbound'])
         self.dx, self.bx, self.nx = dx.numpy(), bx.numpy(), nx.numpy()
 
-        # self.fix_nuscenes_formatting()
         self.scene2map = {}
         for rec in nusc.scene:
             log = nusc.get('log', rec['log_token'])
             self.scene2map[rec['name']] = log['location']
 
-    def fix_nuscenes_formatting(self):
-        """If nuscenes is stored with trainval/1 trainval/2 ... structure, adjust the file paths
-        stored in the nuScenes object.
-        """
-        # check if default file paths work
-        rec = self.ixes[0]
-        sampimg = self.nusc.get('sample_data', rec['data']['CAM_FRONT'])
-        imgname = os.path.join(self.nusc.dataroot, sampimg['filename'])
-
-        def find_name(f):
-            d, fi = os.path.split(f)
-            d, di = os.path.split(d)
-            d, d0 = os.path.split(d)
-            d, d1 = os.path.split(d)
-            d, d2 = os.path.split(d)
-            return di, fi, f'{d2}/{d1}/{d0}/{di}/{fi}'
-
-        # adjust the image paths if needed
-        if not os.path.isfile(imgname):
-            print('adjusting nuscenes file paths')
-            fs = glob(os.path.join(self.nusc.dataroot, 'samples/*/samples/CAM*/*.jpg'))
-            fs += glob(os.path.join(self.nusc.dataroot, 'samples/*/samples/LIDAR_TOP/*.pcd.bin'))
-            info = {}
-            for f in fs:
-                di, fi, fname = find_name(f)
-                info[f'samples/{di}/{fi}'] = fname
-            fs = glob(os.path.join(self.nusc.dataroot, 'sweeps/*/sweeps/LIDAR_TOP/*.pcd.bin'))
-            for f in fs:
-                di, fi, fname = find_name(f)
-                info[f'sweeps/{di}/{fi}'] = fname
-            for rec in self.nusc.sample_data:
-                if rec['channel'] == 'LIDAR_TOP' or (
-                        rec['is_key_frame'] and rec['channel'] in self.data_aug_conf['cams']):
-                    rec['filename'] = info[rec['filename']]
+        self.ixes = self.process()
 
     def get_scenes(self):
-        # filter by scene split
         split = {
             'v1.0-trainval': {True: 'train', False: 'val'},
             'v1.0-mini': {True: 'mini_train', False: 'mini_val'},
@@ -226,47 +179,55 @@ class NuscData(torch.utils.data.Dataset):
 
         return scenes
 
-    def prepro(self):
-
+    def process(self):
         samples = [samp for samp in self.nusc.sample]
-
-        # remove samples that aren't in this split
         samples = [samp for samp in samples if
                    self.nusc.get('scene', samp['scene_token'])['name'] in self.scenes]
+
         ood = []
         id = []
+        oh = []
 
         for rec in samples:
-            if self.ood and len(ood) >= 64:
-                break
 
             ego_pose = self.nusc.get('ego_pose', rec['data']['LIDAR_TOP'])
 
             ego_coord = ego_pose['translation']
+            map_name = self.scene2map[self.nusc.get('scene', rec['scene_token'])['name']]
 
             c = False
 
             for tok in rec['anns']:
                 inst = self.nusc.get('sample_annotation', tok)
 
+                if inst['category_name'] not in self.all_ood: continue
+
                 box_coord = inst['translation']
 
                 if max(abs(ego_coord[0] - box_coord[0]), abs(ego_coord[1] - box_coord[1])) > 100 or int(inst['visibility_token']) <= 2:
                     continue
 
-                if inst['category_name'] in self.ood_labels:
-                    ood.append(rec)
+                x, y = box_coord[0], box_coord[1]
 
-                if inst['category_name'] in self.all_ood:
-                    c = True
-                    break
+                if is_on_road(self.nusc_maps[map_name], x, y):
+                    oh.append(1)
+
+                    if inst['category_name'] in self.ood_labels:
+                        ood.append(rec)
+
+                    if inst['category_name'] in self.all_ood:
+                        c = True
+                        break
 
             if not c:
+                oh.append(0)
                 id.append(rec)
 
-        # sort by scene, timestamp (only to make chronological viz easier)
-        ood.sort(key=lambda x: (x['scene_token'], x['timestamp']))
-        id.sort(key=lambda x: (x['scene_token'], x['timestamp']))
+        print(len(oh))
+        print(len(ood))
+        print(len(id))
+
+        np.save("save.npy", np.array(oh))
 
         return ood if self.ood else id
 
@@ -295,7 +256,6 @@ class NuscData(torch.utils.data.Dataset):
         extrins = []
         post_rots = []
         post_trans = []
-        oods = []
 
         lidar_record = self.nusc.get('sample_data', rec['data']['LIDAR_TOP'])
         egolidar = self.nusc.get('ego_pose', lidar_record['ego_pose_token'])
@@ -303,22 +263,6 @@ class NuscData(torch.utils.data.Dataset):
 
         for cam in cams:
             samp = self.nusc.get('sample_data', rec['data'][cam])
-
-            # ood = np.zeros((270, 480))
-            # data_path, boxes, camera_intrinsic = self.nusc.get_sample_data(
-            #     rec['data'][cam],
-            #     box_vis_level=BoxVisibility.ANY)
-            # for box in boxes:
-            #     if box.name.split('.')[0] == 'vehicle':
-            #         corners = view_points(box.corners(), camera_intrinsic, normalize=True)[:2, :]
-            #
-            #         corners = np.int32(corners * .3).T
-            #
-            #         for i in range(8):
-            #             for j in range(8):
-            #                 cv2.fillConvexPoly(ood, corners[i:j], color=1)
-            #
-            # ood = cv2.resize(ood[46:, :], dsize=(120, 56), interpolation=cv2.INTER_NEAREST)
 
             imgname = os.path.join(self.nusc.dataroot, samp['filename'])
             img = Image.open(imgname)
@@ -404,7 +348,7 @@ class NuscData(torch.utils.data.Dataset):
                 pts[:, [1, 0]] = pts[:, [0, 1]]
                 cv2.fillPoly(vehicles, [pts], 1.0)
 
-        road, lane = get_map(rec, self.nusc_maps, self.nusc, self.scene2map, self.dx[:2], self.bx[:2])
+        road, lane = get_map(rec, self.nusc_maps, self.nusc, self.scene2map)
 
         road[lane == 1] = 0
         road[vehicles == 1] = 0
@@ -414,18 +358,6 @@ class NuscData(torch.utils.data.Dataset):
         empty[vehicles == 1] = 0
         empty[road == 1] = 0
         empty[lane == 1] = 0
-
-        if not self.flipped:
-            vehicles = cv2.flip(vehicles, 0)
-            vehicles = cv2.flip(vehicles, 1)
-            road = cv2.flip(road, 0)
-            road = cv2.flip(road, 1)
-            lane = cv2.flip(lane, 0)
-            lane = cv2.flip(lane, 1)
-            empty = cv2.flip(empty, 0)
-            empty = cv2.flip(empty, 1)
-            ood = cv2.flip(ood, 0)
-            ood = cv2.flip(ood, 1)
 
         label = np.stack((vehicles, road, lane, empty))
 
@@ -465,7 +397,7 @@ def get_nusc_maps(map_folder):
     return nusc_maps
 
 
-def get_map(rec, nusc_maps, nusc, scene2map, dx, bx):
+def get_map(rec, nusc_maps, nusc, scene2map):
     egopose = nusc.get('ego_pose', nusc.get('sample_data', rec['data']['LIDAR_TOP'])['ego_pose_token'])
     map_name = scene2map[nusc.get('scene', rec['scene_token'])['name']]
     center = np.array([egopose['translation'][0], egopose['translation'][1]])
@@ -480,17 +412,17 @@ def get_map(rec, nusc_maps, nusc, scene2map, dx, bx):
     return road.astype(np.uint8), lane.astype(np.uint8)
 
 
-def compile_data(version, config, ood=False, augment_train=False, shuffle_train=True, seg=False):
+def compile_data(version, config, ood=False, shuffle_train=True):
     dataroot = os.path.join("../data", config['dataset'])
     nusc = NuScenes(version='v1.0-{}'.format(version),
                     dataroot=os.path.join(dataroot, version),
                     verbose=False)
     flipped = config['backbone'] == 'lss'
-    dims = (128, 352)
-    # if config['backbone'] == 'lss' else (224, 480)
+    dims = (128, 352) if config['backbone'] == 'lss' else (224, 480)
+
     print(f"Flipped: {flipped}")
     print(f"Dims: {dims}")
-    print(os.path.join(dataroot, version))
+
     nusc_maps = get_nusc_maps(os.path.join(dataroot, version))
 
     train_data = NuscData(nusc, nusc_maps, dims, is_train=True, ood=ood, flipped=flipped)
@@ -504,7 +436,7 @@ def compile_data(version, config, ood=False, augment_train=False, shuffle_train=
                                                worker_init_fn=worker_rnd_init)
 
     val_loader = torch.utils.data.DataLoader(val_data, batch_size=config['batch_size'],
-                                             shuffle=True,
+                                             shuffle=False,
                                              num_workers=config['num_workers'],
                                              drop_last=True,
                                              pin_memory=True,

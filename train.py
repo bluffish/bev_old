@@ -1,4 +1,3 @@
-from sklearn.metrics import roc_auc_score, average_precision_score
 from tensorboardX import SummaryWriter
 
 from datasets.carla import compile_data as compile_data_carla
@@ -9,14 +8,13 @@ import torch
 import torch.nn as nn
 import argparse
 import yaml
-from tqdm import tqdm
 from eval import get
 import random
 import warnings
-from torch.profiler import profile, record_function, ProfilerActivity
+from time import time
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
-torch.backends.cudnn.enabled = False
+# torch.backends.cudnn.enabled = False
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 
@@ -32,14 +30,14 @@ def train():
     num_classes, classes = 4, ["vehicle", "road", "lane", "background"]
 
     compile_data = compile_data_carla if config['dataset'] == 'carla' else compile_data_nuscenes
-    train_loader, val_loader = compile_data("trainval", config, shuffle_train=True, seg=True)
+    train_loader, val_loader = compile_data("trainval", config, shuffle_train=True)
 
     class_proportions = {
         "nuscenes": [.015, .2, .05, .735],
         "carla": [0.0141, 0.3585, 0.02081, 0.6064]
     }
 
-    activation, loss_fn, model = get_model(config['type'], config['backbone'], num_classes, device, use_seg=config['seg'])
+    activation, loss_fn, model = get_model(config['type'], config['backbone'], num_classes, device)
 
     if "postnet" in config['type']:
         if config['backbone'] == 'lss':
@@ -73,38 +71,27 @@ def train():
     print("--------------------------------------------------")
     print(f"Starting training on {config['type']} model with {config['backbone']} backbone")
     print(f"Using GPUS: {config['gpus']}")
-    print("Training using CARLA")
     print(f"Train loader: {len(train_loader.dataset)}")
     print(f"Val loader: {len(val_loader.dataset)}")
     print(f"Batch size: {config['batch_size']}")
     print(f"Output directory: {config['logdir']} ")
-    if config['seg']:
-        print("Using segmentation")
-        os.makedirs(os.path.join(config['logdir'], 'seg'), exist_ok=True)
+
     print("--------------------------------------------------")
 
     writer = SummaryWriter(logdir=config['logdir'])
 
-    best_iou, best_auroc, best_aupr = 0, 0, 0
+    best_iou, step, epoch = 0, 0, 1
 
-    step = 0
-    epoch = 1
-
+    torch.autograd.set_detect_anomaly(True)
     while True:
         for batchi, (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels, ood) in enumerate(
                 train_loader):
             t0 = time()
             opt.zero_grad(set_to_none=True)
-            imgs, s_labels = parse(imgs, gt)
-
-            preds, s_preds = model(imgs, rots, trans, intrins, extrins, post_rots, post_trans)
-            print(preds.shape)
             labels = labels.to(device)
-            s_labels = s_labels.to(device)
 
-            loss = loss_fn(preds, labels, s_preds, s_labels)
-
-            preds = activation(preds)
+            preds = model(imgs, rots, trans, intrins, extrins, post_rots, post_trans)
+            loss = loss_fn(preds, labels)
 
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 5.0)
@@ -112,6 +99,8 @@ def train():
 
             step += 1
             t1 = time()
+
+            preds = activation(preds)
 
             if scheduler is not None:
                 scheduler.step()
@@ -122,9 +111,6 @@ def train():
                 writer.add_scalar('train/step_time', t1 - t0, step)
                 writer.add_scalar('train/loss', loss, step)
                 save_pred(preds, labels, config['logdir'])
-
-                if s_preds is not None:
-                    save_pred(activation(s_preds), s_labels, os.path.join(config['logdir'], 'seg'))
 
             if step % 50 == 0:
                 intersection, union = get_iou(preds, labels)
@@ -143,10 +129,21 @@ def train():
 
                 predictions, ground_truths, uncertainty_scores, uncertainty_labels = get(model, val_loader,
                                                                                          uncertainty_function,
-                                                                                         activation, config['logdir'],
-                                                                                         device)
+                                                                                         activation,
+                                                                                         device,
+                                                                                         config)
+                intersect, union = get_iou(torch.softmax(predictions, dim=1), ground_truths)
+                val_iou = [intersect[i] / union[i] for i in range(len(intersect))]
 
-                print(f"VAL loss: {val_loss}, iou: {val_iou}, auroc {auroc}, aupr {aupr}")
+                fpr, tpr, rec, pr, auroc, aupr, no_skill = roc_pr(uncertainty_scores, uncertainty_labels)
+                pavpu, agc, ugi = calculate_pavpu(uncertainty_scores, uncertainty_labels, uncertainty_threshold=torch.mean(uncertainty_scores))
+
+                print(f"mIOU: {val_iou}")
+                print(f"AUROC {auroc:.3f}")
+                print(f"AUPR {aupr:.3f}",)
+                print(f"PAvPU {pavpu:.3f}")
+                print(f"p(accurate|certain) {agc:.3f}")
+                print(f"p(uncertain|inaccurate) {ugi:.3f}")
 
                 save_path = os.path.join(config['logdir'], f"model{step}.pt")
                 print(f"Saving Model: {save_path}")
@@ -156,20 +153,14 @@ def train():
                     best_iou = sum(val_iou) / len(val_iou)
                     print(f"New best IOU model found. iou: {val_iou}")
                     torch.save(model.state_dict(), os.path.join(config['logdir'], "best_iou.pt"))
-                if auroc >= best_auroc:
-                    best_auroc = auroc
-                    print(f"New best AUROC model found. iou: {auroc}")
-                    torch.save(model.state_dict(), os.path.join(config['logdir'], "best_auroc.pt"))
-                if aupr >= best_aupr:
-                    best_aupr = aupr
-                    print(f"New best AUPR model found. iou: {aupr}")
-                    torch.save(model.state_dict(), os.path.join(config['logdir'], "best_aupr.pt"))
 
                 model.train()
 
-                writer.add_scalar('val/loss', val_loss, step)
-                writer.add_scalar('val/auroc', auroc, step)
-                writer.add_scalar('val/aupr', aupr, step)
+                writer.add_scalar('val/AUROC', auroc, step)
+                writer.add_scalar('val/AUPR', aupr, step)
+                writer.add_scalar('val/PAvPU', pavpu, step)
+                writer.add_scalar('val/p_accurate_certain_', agc, step)
+                writer.add_scalar('val/p_uncertain_inaccurate_', ugi, step)
 
                 for i in range(0, num_classes):
                     writer.add_scalar(f'val/{classes[i]}_iou', val_iou[i], step)

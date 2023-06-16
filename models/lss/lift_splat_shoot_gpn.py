@@ -36,7 +36,6 @@ class BevEncodeGPN(nn.Module):
         self.last = nn.Conv2d(outC, outC, kernel_size=3, padding=1)
 
         self.p_c = None
-        self.tsne = False
 
     def forward(self, x):
         x = self.conv1(x)
@@ -49,8 +48,6 @@ class BevEncodeGPN(nn.Module):
 
         x = self.up1(x, x1)
         x = self.up2(x)
-
-        x_b = torch.clone(x)
 
         x = x.permute(0, 2, 3, 1).to(x.device)
         x = x.reshape(-1, self.latent_size)
@@ -65,27 +62,16 @@ class BevEncodeGPN(nn.Module):
 
         beta = beta.reshape(-1, 200, 200, self.outC).permute(0, 3, 1, 2).contiguous()
 
-        if self.last is not None:
-            beta = self.last(beta.log()).exp()
-        alpha = beta + 1
+        alpha = self.last(beta.log()).exp() + 1
 
-        if self.tsne:
-            return x_b
-        else:
-            return alpha
+        return alpha
 
 
 class LiftSplatShootGPN(LiftSplatShoot):
-    def __init__(self, outC=4, use_seg=False):
-        super(LiftSplatShootGPN, self).__init__(outC=outC, use_seg=use_seg)
+    def __init__(self, outC=4):
+        super(LiftSplatShootGPN, self).__init__(outC=outC)
 
         self.bevencode = BevEncodeGPN(inC=self.camC, outC=self.outC)
-        self.use_seg = use_seg
 
     def forward(self, x, rots, trans, intrins, extrins, post_rots, post_trans):
-        p, s = super().forward(x, rots, trans, intrins, extrins, post_rots, post_trans)
-
-        if s is not None:
-            return p, s.relu() + 1
-        else:
-            return p, None
+        return super().forward(x, rots, trans, intrins, extrins, post_rots, post_trans)

@@ -7,23 +7,7 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-
-def kl_divergence(alpha, num_classes, device=None):
-    ones = torch.ones_like(alpha, dtype=torch.float32, device=device)
-    sum_alpha = torch.sum(alpha, dim=1, keepdim=True)
-    first_term = (
-        torch.lgamma(sum_alpha)
-        - torch.lgamma(alpha).sum(dim=1, keepdim=True)
-        + torch.lgamma(ones).sum(dim=1, keepdim=True)
-        - torch.lgamma(ones.sum(dim=1, keepdim=True))
-    )
-    second_term = (
-        (alpha - ones)
-        .mul(torch.digamma(alpha) - torch.digamma(sum_alpha))
-        .sum(dim=1, keepdim=True)
-    )
-    kl = first_term + second_term
-    return kl
+import torch.distributions as dist
 
 
 class UCELoss(torch.nn.Module):
@@ -43,14 +27,43 @@ class UCELoss(torch.nn.Module):
 
         return A.mean()
 
-    def forward(self, alpha, y, alpha_s, y_s):
+    def forward(self, alpha, y):
 
-        k = self.loss(alpha, y)
+        return self.loss(alpha, y)
 
-        if alpha_s is None:
-            return k
-        else:
-            return self.loss(alpha_s, y_s) + k
+
+class UCELossReg(torch.nn.Module):
+    def __init__(
+        self,
+        weights: Optional[Tensor] = None,
+        num_classes=4,
+    ):
+        super().__init__()
+        self.num_classes = num_classes
+        self.loss_fn = UCELoss(weights=weights, num_classes=num_classes)
+
+        self.l = .00001
+
+    def forward(self, alpha, y, ood):
+        mask = ood.unsqueeze(0).repeat(4, 1, 1, 1).bool()
+
+        alpha = alpha.permute(1, 0, 2, 3)
+        y = y.permute(1, 0, 2, 3)
+
+        alpha_masked = alpha[mask].view(4, -1)
+
+        pred = dist.Dirichlet(alpha_masked)
+        target = dist.Dirichlet(torch.ones_like(alpha_masked))
+
+        reg = dist.kl.kl_divergence(target, pred)
+
+        alpha = alpha[~mask].view(1, 4, -1)
+        y = y[~mask].view(1, 4, -1)
+
+        A = self.loss_fn(alpha, y)
+
+        # return A
+        return A + torch.mean(reg) * self.l
 
 
 class CELoss(torch.nn.Module):
@@ -65,16 +78,11 @@ class CELoss(torch.nn.Module):
 
         self.loss_fn = torch.nn.CrossEntropyLoss(weight=weights)
 
-    def forward(self, pred, target, pred_s, target_s):
+    def forward(self, pred, target):
         if pred.ndim > 4:
             pred = torch.mean(pred, dim=0)
 
-        k = self.loss_fn(pred, target)
-
-        if pred_s is None:
-            return k
-        else:
-            return self.loss_fn(pred_s, target_s) + k
+        return self.loss_fn(pred, target)
 
 
 def scatter(x, classes, colors):

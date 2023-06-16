@@ -12,11 +12,7 @@ sns.set_context("notebook", font_scale=1.25,
 
 
 def replace_last_section(path, new_section):
-    # Split the path into a head and tail
-    # The head contains all the directory names and the tail is the last section
     head, tail = os.path.split(path)
-
-    # Join the head with the new section
     new_path = os.path.join(head, new_section)
 
     return new_path
@@ -119,10 +115,6 @@ if __name__ == "__main__":
             print(f"AUROC: {auroc:.3f}, AUPR: {aupr:.3f}")
         elif metric == "all":
             fpr, tpr, rec, pr, auroc, aupr, no_skill = roc_pr(uncertainty_scores, uncertainty_labels)
-            # config['model_path'] = replace_last_section(set[name]['path'], 'best_iou.pt')
-            #
-            # predictions, ground_truths, uncertainty_scores, uncertainty_labels, iou = eval(config=config, is_ood=is_ood,
-            #                                                                                    gt=gt)
 
             pavpu, agc, ugi, thresholds, au_pavpu, au_agc, au_ugi = patch_metrics(uncertainty_scores,
                                                                                   uncertainty_labels)
@@ -169,7 +161,6 @@ if __name__ == "__main__":
         ax1.legend(frameon=True)
         ax2.legend(frameon=True)
 
-    # fig.suptitle(f"{'OOD' if is_ood else 'Misclassification'} - {set_name}")
     fig.suptitle(f"{'OOD' if is_ood else 'Misclassification'}")
     save_path = f"{logdir}/{metric}_{'o' if is_ood else 'm'}_{set_name}.png"
     fig.savefig(save_path)

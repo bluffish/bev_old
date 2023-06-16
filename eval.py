@@ -8,8 +8,8 @@ from tools.utils import *
 from tools.uncertainty import *
 from tools.loss import *
 
-import argparse
-import yaml
+import argparse, yaml, random
+from time import time
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -29,7 +29,7 @@ torch.manual_seed(0)
 torch.cuda.manual_seed(0)
 
 
-def get(model, loader, uncertainty_function, activation, logdir, device):
+def get(model, loader, uncertainty_function, activation, device, config, is_ood=False):
     predictions = torch.zeros((len(loader.dataset), 4, 200, 200))
     ground_truths = torch.zeros((len(loader.dataset), 4, 200, 200))
     uncertainty_scores = torch.zeros((len(loader.dataset), 200, 200))
@@ -40,28 +40,24 @@ def get(model, loader, uncertainty_function, activation, logdir, device):
     with torch.no_grad():
         for i, (imgs, rots, trans, intrins, extrins, post_rots, post_trans, labels, ood) in enumerate(tqdm(loader)):
             range_i = slice(i * config['batch_size'], i * config['batch_size'] + config['batch_size'])
-
-            imgs, s_labels = parse(imgs, gt)
-
             t = time()
-            preds, _ = model(imgs, rots, trans, intrins, extrins, post_rots, post_trans)
+            preds = model(imgs, rots, trans, intrins, extrins, post_rots, post_trans)
             total += time()-t
 
             uncertainty = uncertainty_function(preds).cpu()
-
-            preds = activation(preds)
             labels = labels.to(device)
 
             predictions[range_i] = preds
             ground_truths[range_i] = labels
             uncertainty_scores[range_i] = torch.squeeze(uncertainty, dim=1)
+            preds = activation(preds)
 
-            cv2.imwrite(os.path.join(logdir, "uncertainty_map.png"),
+            cv2.imwrite(os.path.join(config['logdir'], "uncertainty_map.png"),
                        cv2.cvtColor((plt.cm.jet(uncertainty[0][0])*255).astype(np.uint8), cv2.COLOR_RGB2BGR))
-            save_pred(preds, labels, logdir)
+            save_pred(preds, labels, config['logdir'])
 
             if is_ood:
-                cv2.imwrite(os.path.join(logdir, f"ood.png"),
+                cv2.imwrite(os.path.join(config['logdir'], f"ood.png"),
                            ood[0].cpu().numpy()*255)
 
                 uncertainty_labels[range_i] = ood
@@ -70,27 +66,27 @@ def get(model, loader, uncertainty_function, activation, logdir, device):
                 lmax = torch.argmax(labels, dim=1).cpu()
                 misclassified = pmax != lmax
 
-                cv2.imwrite(os.path.join(logdir, "misclassified.png"), misclassified[0].cpu().numpy()*255)
+                cv2.imwrite(os.path.join(config['logdir'], "misclassified.png"), misclassified[0].cpu().numpy()*255)
 
                 uncertainty_labels[range_i] = misclassified
 
     return predictions, ground_truths, uncertainty_scores, uncertainty_labels
 
 
-def eval(config, is_ood=False, gt=False, save=False):
+def eval(config, is_ood=False, save=False):
     name = f"{config['backbone']}_{config['type']}"
     device = torch.device('cpu') if len(config['gpus']) < 0 else torch.device(f'cuda:{config["gpus"][0]}')
     num_classes, classes = 4, ["vehicle", "road", "lane", "background"]
 
     compile_data = compile_data_carla if config['dataset'] == 'carla' else compile_data_nuscenes
-    train_loader, val_loader = compile_data("mini" if is_ood else "mini", config, shuffle_train=True, ood=is_ood, seg=True)
+    train_loader, val_loader = compile_data("trainval" if is_ood else "trainval", config, shuffle_train=True, ood=is_ood)
 
     class_proportions = {
         "nuscenes": [.015, .2, .05, .735],
         "carla": [0.0141, 0.3585, 0.02081, 0.6064]
     }
 
-    activation, loss_fn, model = get_model(config['type'], config['backbone'], num_classes, device, use_seg=config['seg'])
+    activation, loss_fn, model = get_model(config['type'], config['backbone'], num_classes, device)
 
     if config['type'] == 'baseline' or config['type'] == 'dropout' or config['type'] == 'ensemble':
         uncertainty_function = entropy
@@ -98,7 +94,7 @@ def eval(config, is_ood=False, gt=False, save=False):
         if is_ood:
             uncertainty_function = vacuity
         else:
-            uncertainty_function = aleatoric
+            uncertainty_function = dissonance
 
     if "postnet" in config['type']:
         if config['backbone'] == 'lss':
@@ -122,14 +118,14 @@ def eval(config, is_ood=False, gt=False, save=False):
     print(f"Output directory: {config['logdir']} ")
     print(f"OOD: {is_ood}")
     print(f"Model path: {config['model_path']}")
-    if config['seg']: print("Using segmentation")
     print("--------------------------------------------------")
 
     os.makedirs(config['logdir'], exist_ok=True)
 
-    predictions, ground_truths, uncertainty_scores, uncertainty_labels = get(model, val_loader, uncertainty_function, activation, config['logdir'], device)
+    predictions, ground_truths, uncertainty_scores, uncertainty_labels = get(model, val_loader, uncertainty_function, activation, device, config,
+                                                                             is_ood=is_ood)
 
-    intersect, union = get_iou(predictions, ground_truths)
+    intersect, union = get_iou(torch.softmax(predictions, dim=1), ground_truths)
 
     iou = [intersect[i]/union[i] for i in range(len(intersect))]
 
@@ -178,7 +174,8 @@ if __name__ == "__main__":
     metric = args.metric
     name = f"{config['backbone']}_{config['type']}"
 
-    predictions, ground_truths, uncertainty_scores, uncertainty_labels, iou = eval(config, is_ood=is_ood, gt=gt, save=save)
+    predictions, ground_truths, uncertainty_scores, uncertainty_labels, iou = eval(config, is_ood=is_ood, save=save)
+    print(torch.mean(predictions))
 
     if metric == 'patch':
         pavpu, agc, ugi, thresholds, au_pavpu, au_agc, au_ugi = patch_metrics(uncertainty_scores, uncertainty_labels)

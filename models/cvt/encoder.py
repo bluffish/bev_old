@@ -10,9 +10,9 @@ from models.cvt.efficientnet import EfficientNetExtractor
 
 ResNetBottleNeck = lambda c: Bottleneck(c, c // 4)
 
-H = 128
-W = 352
-O = 0
+H = 224
+W = 480
+O = 46
 
 def inverse(x):
     return torch.tensor(np.linalg.inv(x.cpu().numpy())).to(x.device)
@@ -294,23 +294,15 @@ class Encoder(nn.Module):
             dim: int = 128,
             middle: List[int] = [2, 2],
             scale: float = 1.0,
-            use_seg=False,
     ):
         super().__init__()
 
         self.norm = Normalize()
-        self.use_seg = use_seg
 
-        if use_seg:
-            self.backbone = EfficientNetExtractor(model_name="efficientnet-b4",
-                                                  layer_names=['reduction_2', 'reduction_4'],
-                                                  image_height=H,
-                                                  image_width=W, channels=7)
-        else:
-            self.backbone = EfficientNetExtractor(model_name="efficientnet-b4",
-                                                  layer_names=['reduction_2', 'reduction_4'],
-                                                  image_height=H,
-                                                  image_width=W, channels=3)
+        self.backbone = EfficientNetExtractor(model_name="efficientnet-b4",
+                                              layer_names=['reduction_2', 'reduction_4'],
+                                              image_height=H,
+                                              image_width=W, channels=3)
 
         cross_view = {
             "heads": 4,
@@ -363,10 +355,7 @@ class Encoder(nn.Module):
         I_inv = inverse(batch['intrinsics'])  # b n 3 3
         E_inv = inverse(batch['extrinsics'])  # b n 4 4
 
-        if self.use_seg:
-            image[:, :3, :, :] = self.norm(image[:, :3, :, :])
-        else:
-            image = self.norm(image)
+        image = self.norm(image)
 
         features = [self.down(y) for y in self.backbone(image)]
 

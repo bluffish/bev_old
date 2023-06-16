@@ -9,5 +9,5 @@ outputs/
 pts/
 test/
 carla_old/
-
+bin/
 *.pt

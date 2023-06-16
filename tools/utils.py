@@ -88,20 +88,6 @@ def roc_pr(uncertainty_scores, uncertainty_labels, sample_size=1_000_000):
     return fpr, tpr, rec, pr, auroc, aupr, no_skill
 
 
-def parse(imgs, gt):
-    seg = imgs[:, :, 3:, :, :].view(-1, 3, 128, 352)
-    back = ~(seg[:, 0, :, :] + seg[:, 1, :, :] + seg[:, 2, :, :]).bool()[:, None, :, :]
-    seg = torch.cat((seg, back), dim=1)
-    i = imgs[:, :, :3, :, :]
-
-    if gt:
-        back = ~(imgs[:, :, 3, :, :] + imgs[:, :, 4, :, :] + imgs[:, :, 5, :, :]).bool()[:, :, None, :, :]
-
-        return torch.cat((imgs, back), dim=2), seg
-
-    return i, seg
-
-
 def get_iou(preds, labels):
     classes = preds.shape[1]
     intersect = [0]*classes
@@ -117,24 +103,6 @@ def get_iou(preds, labels):
     return intersect, union
 
 
-def get_iou_un(score, true):
-    # thresh = torch.mean(score)
-    thresh = .4
-
-    with torch.no_grad():
-        pred = score >= thresh
-
-        cv2.imwrite("pred.png", pred[0].detach().cpu().numpy()*255)
-        cv2.imwrite("label.png", true[0].cpu().numpy()*255)
-
-        tgt = true.bool()
-        intersect = (pred & tgt).sum().float().item()
-        union = (pred | tgt).sum().float().item()
-
-    return intersect, union
-
-
-
 backbones = {
     'lss': [LiftSplatShoot, LiftSplatShootENN, LiftSplatShootGPN, LiftSplatShootDropout, LiftSplatShootEnsemble],
     'cvt': [CrossViewTransformer, CrossViewTransformerENN, CrossViewTransformerGPN, CrossViewTransformerDropout,
@@ -142,29 +110,29 @@ backbones = {
 }
 
 
-def get_model(type, backbone, num_classes, device, use_seg=False):
+def get_model(type, backbone, num_classes, device):
     weights = torch.tensor([3.0, 1.0, 2.0, 1.0]).to(device)
 
     if type == 'baseline':
         activation = softmax
         loss_fn = CELoss(weights=weights.cuda(device)).cuda(device)
-        model = backbones[backbone][0](outC=num_classes, use_seg=use_seg)
+        model = backbones[backbone][0](outC=num_classes)
     elif type == 'enn':
         activation = activate_uce
         loss_fn = UCELoss(weights=weights).cuda(device)
-        model = backbones[backbone][1](outC=num_classes, use_seg=use_seg)
+        model = backbones[backbone][1](outC=num_classes)
     elif type == 'postnet':
         activation = activate_uce
         loss_fn = UCELoss(weights=weights).cuda(device)
-        model = backbones[backbone][2](outC=num_classes, use_seg=use_seg)
+        model = backbones[backbone][2](outC=num_classes)
     elif type == 'dropout':
         activation = softmax
         loss_fn = CELoss(weights=weights.cuda(device)).cuda(device)
-        model = backbones[backbone][3](outC=num_classes, use_seg=use_seg)
+        model = backbones[backbone][3](outC=num_classes)
     elif type == 'ensemble':
         activation = softmax
         loss_fn = CELoss(weights=weights.cuda(device)).cuda(device)
-        model = backbones[backbone][4](outC=num_classes, use_seg=use_seg)
+        model = backbones[backbone][4](outC=num_classes)
     else:
         raise ValueError("Please pick a valid model type.")
 

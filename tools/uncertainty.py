@@ -42,8 +42,6 @@ def softmax(x):
     if x.ndim == 4:
         return torch.softmax(x, dim=1)
     else:
-        # soft = torch.softmax(x, dim=2)
-        # return torch.mean(soft, dim=0)
         mean = torch.mean(x, dim=0)
         return torch.softmax(mean, dim=1)
 
@@ -61,7 +59,6 @@ def entropy(pred):
     prob = softmax(pred) + 1e-10
     e = - prob * (torch.log(prob) / np.log(class_num))
     u = torch.sum(e, dim=1, keepdim=True)
-
     return u
 
 
@@ -70,5 +67,4 @@ def vacuity(alpha):
     S = torch.sum(alpha, dim=1, keepdim=True)
     v = class_num / S
 
-    return v / torch.max(v)
-    # return v
+    return v
