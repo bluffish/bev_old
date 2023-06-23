@@ -1,12 +1,14 @@
+import math
 from typing import Optional
-from torch import Tensor
+
+import pyblaze.nn.functional as X
 import torch
 import torch.nn as nn
-import math
-import pyblaze.nn.functional as X
+from torch import Tensor
 
-from models.gpn.normalizing_flow import NormalizingFlow, BatchedNormalizingFlowDensity
 from models.gpn.mixture_density import MixtureDensity
+from models.gpn.normalizing_flow import (BatchedNormalizingFlowDensity,
+                                         NormalizingFlow)
 
 
 class Evidence(nn.Module):

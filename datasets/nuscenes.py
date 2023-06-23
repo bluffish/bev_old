@@ -1,20 +1,20 @@
 
-import torch
 import os
-import numpy as np
-from PIL import Image
+from glob import glob
+
 import cv2
+import numpy as np
+import torch
+import torchvision
+from nuscenes.eval.common.utils import quaternion_yaw
+from nuscenes.map_expansion.map_api import NuScenesMap
+from nuscenes.utils.data_classes import Box
+from nuscenes.utils.splits import create_splits_scenes
+from PIL import Image
 from pyquaternion import Quaternion
 from shapely.geometry import Point, Polygon
 
-from nuscenes.eval.common.utils import quaternion_yaw
 from nuscenes.nuscenes import NuScenes
-from nuscenes.utils.splits import create_splits_scenes
-from nuscenes.utils.data_classes import Box
-from nuscenes.map_expansion.map_api import NuScenesMap
-
-from glob import glob
-import torchvision
 
 
 class NormalizeInverse(torchvision.transforms.Normalize):

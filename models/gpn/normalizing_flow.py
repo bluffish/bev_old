@@ -1,14 +1,15 @@
-import torch.nn as nn
-import pyblaze.nn as xnn
-from pyblaze.utils.stdlib import flatten
-from pyro.distributions.util import copy_docs_from
-from pyro.distributions.torch_transform import TransformModule
-from torch.distributions import Transform, constraints
-import torch.distributions as tdist
-import torch.nn.functional as F
-from torch import nn
-import torch
 import math
+
+import pyblaze.nn as xnn
+import torch
+import torch.distributions as tdist
+import torch.nn as nn
+import torch.nn.functional as F
+from pyblaze.utils.stdlib import flatten
+from pyro.distributions.torch_transform import TransformModule
+from pyro.distributions.util import copy_docs_from
+from torch import nn
+from torch.distributions import Transform, constraints
 
 
 class NormalizingFlow(xnn.NormalizingFlow):

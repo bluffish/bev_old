@@ -1,8 +1,6 @@
 import torch
 import torch.nn as nn
-
 from efficientnet_pytorch import EfficientNet
-
 
 # Precomputed aliases
 MODELS = {

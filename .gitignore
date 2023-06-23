@@ -11,3 +11,4 @@ test/
 carla_old/
 bin/
 *.pt
+**/__pycache__

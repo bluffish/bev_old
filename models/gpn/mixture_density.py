@@ -1,7 +1,6 @@
 import torch
-from torch import nn
-from torch import Tensor
 import torch.distributions as tdist
+from torch import Tensor, nn
 
 
 class MixtureDensity(nn.Module):

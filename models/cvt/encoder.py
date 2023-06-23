@@ -1,11 +1,12 @@
+from typing import List
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 from einops import rearrange, repeat
 from torchvision.models.resnet import Bottleneck
-from typing import List
-import numpy as np
+
 from models.cvt.efficientnet import EfficientNetExtractor
 
 ResNetBottleNeck = lambda c: Bottleneck(c, c // 4)

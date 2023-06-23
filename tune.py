@@ -1,17 +1,17 @@
+import argparse
+import random
+import warnings
+from time import time
+
+import torch
+import torch.nn as nn
+import yaml
 from tensorboardX import SummaryWriter
 
 from datasets.carla import compile_data as compile_data_carla
 from datasets.nuscenes import compile_data as compile_data_nuscenes
-
-from tools.utils import *
-import torch
-import torch.nn as nn
-import argparse
-import yaml
 from eval import get
-import random
-import warnings
-from time import time
+from tools.utils import *
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 # torch.backends.cudnn.enabled = False

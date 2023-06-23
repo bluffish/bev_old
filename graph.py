@@ -1,9 +1,12 @@
-import argparse, yaml
-from eval import eval
-import seaborn as sns
-import matplotlib.pyplot as plt
-from tools.utils import *
+import argparse
 import os
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+import yaml
+
+from eval import eval
+from tools.utils import *
 
 sns.set_style('white')
 sns.set_palette('muted')

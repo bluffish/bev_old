@@ -2,8 +2,8 @@ from typing import Any
 
 import numpy as np
 import torch
-from torch import nn
 from efficientnet_pytorch import EfficientNet
+from torch import nn
 from torchvision.models.resnet import resnet18
 
 

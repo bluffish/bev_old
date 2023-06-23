@@ -1,19 +1,19 @@
-import torch
-
-from datasets.nuscenes import compile_data as compile_data_nuscenes
-from datasets.carla import compile_data as compile_data_carla
-from tqdm import tqdm
-
-from tools.utils import *
-from tools.uncertainty import *
-from tools.loss import *
-
-import argparse, yaml, random
+import argparse
+import random
 from time import time
 
 import matplotlib.pyplot as plt
 import seaborn as sns
+import torch
+import yaml
 from torch import nn
+from tqdm import tqdm
+
+from datasets.carla import compile_data as compile_data_carla
+from datasets.nuscenes import compile_data as compile_data_nuscenes
+from tools.loss import *
+from tools.uncertainty import *
+from tools.utils import *
 
 sns.set_style('white')
 sns.set_palette('muted')

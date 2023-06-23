@@ -1,11 +1,11 @@
-import argparse, yaml
-
-import torch
-
-from eval import eval
+import argparse
 
 import matplotlib.pyplot as plt
 import seaborn as sns
+import torch
+import yaml
+
+from eval import eval
 
 sns.set_style('white')
 sns.set_palette('muted')

@@ -6,9 +6,10 @@ arXiv preprint arXiv:2104.00298.
 import from https://github.com/d-li14/mobilenetv2.pytorch
 """
 
+import math
+
 import torch
 import torch.nn as nn
-import math
 
 __all__ = ['effnetv2_s', 'effnetv2_m', 'effnetv2_l', 'effnetv2_xl']
 
